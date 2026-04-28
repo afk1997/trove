@@ -454,12 +454,13 @@
     position: relative;
     overflow: hidden;
   }
-  .clip-progress::after {
-    content: ''; position: absolute; inset: 0;
-    background: linear-gradient(90deg, transparent, var(--orange) 50%, transparent);
-    animation: scan 1.4s linear infinite;
-    width: 40%;
-    mix-blend-mode: screen;
+  .clip-progress-fill {
+    position: absolute;
+    top: 0; left: 0; bottom: 0;
+    background: var(--orange);
+    z-index: 1;
+    box-shadow: 1px 0 0 rgba(0, 0, 0, 0.18);
+    /* Width set inline by template; stays sharp on htmx swap. */
   }
 
   .clip-saving-stamp {
@@ -683,7 +684,6 @@
     transition-duration: 0.01ms !important;
   }
   .clip { animation: none; }
-  .clip-progress::after { display: none; }
   .clip-saved-stamp { animation: none; }
   .clip-saved-stamp::before { display: none; }
   .clip-saving-stamp .ellipsis { animation: none; opacity: 1; }

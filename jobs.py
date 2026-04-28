@@ -32,6 +32,11 @@ class Job:
     process: object | None = None  # subprocess.Popen, set by runner if it wants kill support
     created_at: float = field(default_factory=time.monotonic)
     last_accessed: float = field(default_factory=time.monotonic)
+    # Progress (populated by runner during DOWNLOADING)
+    downloaded_bytes: int = 0
+    total_bytes: int = 0
+    speed: float = 0.0  # bytes/sec
+    eta: int = 0  # seconds remaining
 
 
 class JobManager:

@@ -174,9 +174,7 @@ def create_app() -> Flask:
         job = job_manager.get(job_id)
         if job is None:
             return "", 404
-        # Skip swap while still in progress so animations + thumbnail stay smooth.
-        if job.status in (JobStatus.QUEUED, JobStatus.DOWNLOADING):
-            return "", 204
+        # Always return the rendered card so progress updates are visible on every poll.
         return render_template("partials/card.html", card=_card_view(job))
 
     @app.post("/api/job/<job_id>/cancel")
@@ -196,11 +194,23 @@ def create_app() -> Flask:
         def _work(job: Job):
             job.thumbnail = thumbnail
             out_template = str(DOWNLOAD_DIR / f"{job.id}.%(ext)s")
+
+            def _on_progress(downloaded, total, speed, eta):
+                job.downloaded_bytes = downloaded
+                job.total_bytes = total
+                job.speed = speed
+                job.eta = eta
+
+            def _register_proc(popen):
+                job.process = popen
+
             result = run_download(
                 url=url,
                 out_template=out_template,
                 format_choice=format_choice,
                 format_id=format_id,
+                progress_cb=_on_progress,
+                register_process=_register_proc,
             )
             if result.error_category:
                 job.status = JobStatus.ERROR
@@ -214,6 +224,9 @@ def create_app() -> Flask:
         return job_manager.submit(target=_work, title=title, url=url)
 
     def _card_view(job: Job) -> dict:
+        percent = 0
+        if job.total_bytes > 0:
+            percent = min(100, int(job.downloaded_bytes / job.total_bytes * 100))
         return {
             "kind": job.status.value,
             "id": job.id,
@@ -222,6 +235,11 @@ def create_app() -> Flask:
             "thumbnail": job.thumbnail or "",
             "filename": job.filename,
             "category": job.error_category,
+            "downloaded_bytes": job.downloaded_bytes,
+            "total_bytes": job.total_bytes,
+            "speed": job.speed,
+            "eta": job.eta,
+            "percent": percent,
         }
 
     return app

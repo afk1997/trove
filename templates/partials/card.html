@@ -81,18 +81,34 @@
   data-job-id="{{ card.id }}"
   data-status="downloading"
   hx-get="/api/status-card/{{ card.id }}"
-  hx-trigger="every 2s"
+  hx-trigger="every 1s"
   hx-swap="outerHTML"
 >
   {{ thumb(card) }}
   <div class="clip-body">
     <p class="clip-title">{{ card.title or "untitled" }}</p>
-    <p class="clip-meta">SAVING IN PROGRESS</p>
+    <p class="clip-meta">
+      {% if card.total_bytes %}
+        {{ "%.1f"|format(card.downloaded_bytes / 1048576) }} MB
+        <span class="sep">/</span>{{ "%.1f"|format(card.total_bytes / 1048576) }} MB
+        <span class="sep">·</span>{{ card.percent }}%
+        {% if card.speed %}
+          <span class="sep">·</span>{{ "%.1f"|format(card.speed / 1048576) }} MB/s
+        {% endif %}
+        {% if card.eta %}
+          <span class="sep">·</span>ETA {{ "%d:%02d"|format(card.eta // 60, card.eta % 60) }}
+        {% endif %}
+      {% else %}
+        STARTING…
+      {% endif %}
+    </p>
   </div>
   <div class="clip-action">
     <span class="clip-saving-stamp">Saving<span class="ellipsis">…</span></span>
   </div>
-  <div class="clip-progress"></div>
+  <div class="clip-progress">
+    <div class="clip-progress-fill" style="width: {{ card.percent or 0 }}%"></div>
+  </div>
 </div>
 
 {% elif card.kind == "done" %}

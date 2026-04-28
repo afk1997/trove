@@ -3,6 +3,8 @@ import os
 import json
 import subprocess
 import glob
+import threading
+import time
 from dataclasses import dataclass, field
 
 
@@ -148,33 +150,8 @@ def _cleanup_glob(out_template: str) -> None:
             pass
 
 
-def run_download(
-    *,
-    url: str,
-    out_template: str,
-    format_choice: str,
-    format_id: str | None,
-    timeout: int = 300,
-) -> DownloadResult:
-    argv = build_download_argv(
-        url=url,
-        out_template=out_template,
-        format_choice=format_choice,
-        format_id=format_id,
-    )
-    try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        _cleanup_glob(out_template)
-        return DownloadResult(error_category="timeout", error_raw="download timed out")
-    if proc.returncode != 0:
-        _cleanup_glob(out_template)
-        stripped = (proc.stderr or "").strip()
-        return DownloadResult(
-            error_category=classify_error(proc.stderr),
-            error_raw=stripped.splitlines()[-1] if stripped else "",
-        )
-
+def _resolve_output(out_template: str, format_choice: str) -> DownloadResult:
+    """Pick the final output file from the glob (shared by both run paths)."""
     base_glob = out_template.replace("%(ext)s", "*")
     files = sorted(glob.glob(base_glob))
     if not files:
@@ -206,3 +183,143 @@ def run_download(
             pass
 
     return DownloadResult(file_path=chosen)
+
+
+def _parse_progress_int(s: str) -> int:
+    if s in ("NA", "None", ""):
+        return 0
+    try:
+        return int(float(s))
+    except ValueError:
+        return 0
+
+
+def _parse_progress_float(s: str) -> float:
+    if s in ("NA", "None", ""):
+        return 0.0
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def run_download(
+    *,
+    url: str,
+    out_template: str,
+    format_choice: str,
+    format_id: str | None,
+    timeout: int = 300,
+    progress_cb=None,
+    register_process=None,
+) -> DownloadResult:
+    """Run yt-dlp to download a media file.
+
+    When `progress_cb` and `register_process` are both None, uses a blocking
+    subprocess.run() — this is the path the unit tests exercise. When either
+    is provided, switches to a streaming Popen() path that emits progress
+    events parsed from yt-dlp's --progress-template output.
+
+    progress_cb signature: (downloaded_bytes:int, total_bytes:int, speed:float, eta:int)
+    register_process signature: (popen) — called once with the live Popen handle
+    so callers can implement cancellation.
+    """
+    argv = build_download_argv(
+        url=url,
+        out_template=out_template,
+        format_choice=format_choice,
+        format_id=format_id,
+    )
+
+    # Legacy blocking path: tests monkeypatch subprocess.run, so keep it intact
+    # when nothing wants progress streaming.
+    if progress_cb is None and register_process is None:
+        try:
+            proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _cleanup_glob(out_template)
+            return DownloadResult(error_category="timeout", error_raw="download timed out")
+        if proc.returncode != 0:
+            _cleanup_glob(out_template)
+            stripped = (proc.stderr or "").strip()
+            return DownloadResult(
+                error_category=classify_error(proc.stderr),
+                error_raw=stripped.splitlines()[-1] if stripped else "",
+            )
+        return _resolve_output(out_template, format_choice)
+
+    # Streaming path: Popen + per-line progress parsing.
+    progress_argv = [
+        "--newline",
+        "--progress-template",
+        "TROVE_PROG|%(progress.downloaded_bytes)s|%(progress.total_bytes,total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s",
+    ]
+    streamed_argv = argv[:1] + progress_argv + argv[1:]
+
+    try:
+        proc = subprocess.Popen(
+            streamed_argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+    except OSError as e:
+        return DownloadResult(error_category="unknown", error_raw=str(e))
+
+    if register_process:
+        register_process(proc)
+
+    stderr_buf: list[str] = []
+
+    def _drain_stderr():
+        try:
+            for line in proc.stderr:
+                stderr_buf.append(line)
+        except Exception:
+            pass
+
+    err_thread = threading.Thread(target=_drain_stderr, daemon=True)
+    err_thread.start()
+
+    start = time.monotonic()
+    try:
+        for line in proc.stdout:
+            line = line.rstrip("\r\n")
+            if line.startswith("TROVE_PROG|") and progress_cb:
+                parts = line.split("|")
+                if len(parts) == 5:
+                    try:
+                        progress_cb(
+                            _parse_progress_int(parts[1]),
+                            _parse_progress_int(parts[2]),
+                            _parse_progress_float(parts[3]),
+                            _parse_progress_int(parts[4]),
+                        )
+                    except Exception:
+                        pass
+            if time.monotonic() - start > timeout:
+                proc.kill()
+                _cleanup_glob(out_template)
+                return DownloadResult(error_category="timeout", error_raw="download timed out")
+    except Exception:
+        pass
+
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=2)
+
+    err_thread.join(timeout=2)
+    stderr_text = "".join(stderr_buf)
+
+    if proc.returncode != 0:
+        _cleanup_glob(out_template)
+        stripped = stderr_text.strip()
+        return DownloadResult(
+            error_category=classify_error(stderr_text),
+            error_raw=stripped.splitlines()[-1] if stripped else "",
+        )
+
+    return _resolve_output(out_template, format_choice)
