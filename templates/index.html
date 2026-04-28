@@ -73,6 +73,28 @@
 </div>
 
 <script nonce="{{ g.csp_nonce }}">
+  // Rotate placeholder through supported sources every 2.8s. Pauses when the
+  // input is focused or has content. Skipped under prefers-reduced-motion.
+  (function () {
+    var input = document.getElementById('urls');
+    if (!input) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var sources = [
+      'https://www.youtube.com/watch?v=…',
+      'https://x.com/user/status/…',
+      'https://www.instagram.com/p/…',
+      'https://www.tiktok.com/@user/video/…',
+      'https://vimeo.com/…'
+    ];
+    var idx = 0;
+    setInterval(function () {
+      if (input === document.activeElement) return;
+      if (input.value.length > 0) return;
+      idx = (idx + 1) % sources.length;
+      input.setAttribute('placeholder', sources[idx]);
+    }, 2800);
+  })();
+
   // Format toggle (vanilla — strict CSP blocks Alpine's eval-based directives)
   document.querySelectorAll('.hero-toggle .hero-pill').forEach(function (btn) {
     btn.addEventListener('click', function () {
