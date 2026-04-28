@@ -2,6 +2,9 @@ from __future__ import annotations
 import ipaddress
 import socket
 from urllib.parse import urlparse
+import os
+from functools import wraps
+from flask import request, jsonify
 
 
 _ALLOWED_SCHEMES = {"http", "https"}
@@ -72,3 +75,16 @@ def is_safe_url(url: str) -> bool:
         if _is_blocked_ip(addr):
             return False
     return True
+
+
+def token_required(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        token = os.environ.get("TROVE_TOKEN", "").strip()
+        if not token:
+            return view(*args, **kwargs)
+        header = request.headers.get("Authorization", "")
+        if header == f"Bearer {token}":
+            return view(*args, **kwargs)
+        return jsonify({"error": "unauthorized"}), 401
+    return wrapper
