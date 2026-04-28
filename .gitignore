@@ -18,3 +18,7 @@ downloads/
 # IDE
 .vscode/
 .idea/
+
+# Superpowers (brainstorm sessions, worktrees)
+.superpowers/
+.worktrees/
