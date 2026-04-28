@@ -5,6 +5,9 @@ from urllib.parse import urlparse
 import os
 from functools import wraps
 from flask import request, jsonify
+import time
+from collections import deque
+from threading import Lock
 
 
 _ALLOWED_SCHEMES = {"http", "https"}
@@ -88,3 +91,27 @@ def token_required(view):
             return view(*args, **kwargs)
         return jsonify({"error": "unauthorized"}), 401
     return wrapper
+
+
+class RateLimiter:
+    """Sliding-window per-key rate limiter. In-process only."""
+
+    def __init__(self, rate: int, per_seconds: int):
+        self.rate = rate
+        self.per_seconds = per_seconds
+        self._hits: dict[str, deque[float]] = {}
+        self._lock = Lock()
+
+    def allow(self, key: str) -> bool:
+        if self.rate <= 0:
+            return True
+        now = time.monotonic()
+        with self._lock:
+            q = self._hits.setdefault(key, deque())
+            cutoff = now - self.per_seconds
+            while q and q[0] < cutoff:
+                q.popleft()
+            if len(q) >= self.rate:
+                return False
+            q.append(now)
+            return True
