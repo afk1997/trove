@@ -249,8 +249,12 @@ def run_download(
         return _resolve_output(out_template, format_choice)
 
     # Streaming path: Popen + per-line progress parsing.
+    # yt-dlp writes default progress to stderr; --progress-template outputs may
+    # also land on stderr in subprocess mode. Drain both pipes and look for
+    # the TROVE_PROG marker in either.
     progress_argv = [
         "--newline",
+        "--progress",
         "--progress-template",
         "TROVE_PROG|%(progress.downloaded_bytes)s|%(progress.total_bytes,total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s",
     ]
@@ -272,46 +276,56 @@ def run_download(
 
     stderr_buf: list[str] = []
 
-    def _drain_stderr():
+    def _try_progress(line: str) -> bool:
+        if not line.startswith("TROVE_PROG|") or not progress_cb:
+            return False
+        parts = line.split("|")
+        if len(parts) != 5:
+            return False
         try:
-            for line in proc.stderr:
-                stderr_buf.append(line)
+            progress_cb(
+                _parse_progress_int(parts[1]),
+                _parse_progress_int(parts[2]),
+                _parse_progress_float(parts[3]),
+                _parse_progress_int(parts[4]),
+            )
+        except Exception:
+            pass
+        return True
+
+    def _drain(stream, capture_buf):
+        try:
+            for raw in stream:
+                line = raw.rstrip("\r\n")
+                if _try_progress(line):
+                    continue
+                if capture_buf is not None:
+                    capture_buf.append(raw)
         except Exception:
             pass
 
-    err_thread = threading.Thread(target=_drain_stderr, daemon=True)
+    out_thread = threading.Thread(target=_drain, args=(proc.stdout, None), daemon=True)
+    err_thread = threading.Thread(target=_drain, args=(proc.stderr, stderr_buf), daemon=True)
+    out_thread.start()
     err_thread.start()
 
-    start = time.monotonic()
-    try:
-        for line in proc.stdout:
-            line = line.rstrip("\r\n")
-            if line.startswith("TROVE_PROG|") and progress_cb:
-                parts = line.split("|")
-                if len(parts) == 5:
-                    try:
-                        progress_cb(
-                            _parse_progress_int(parts[1]),
-                            _parse_progress_int(parts[2]),
-                            _parse_progress_float(parts[3]),
-                            _parse_progress_int(parts[4]),
-                        )
-                    except Exception:
-                        pass
-            if time.monotonic() - start > timeout:
-                proc.kill()
-                _cleanup_glob(out_template)
-                return DownloadResult(error_category="timeout", error_raw="download timed out")
-    except Exception:
-        pass
+    deadline = time.monotonic() + timeout
+    while True:
+        rc = proc.poll()
+        if rc is not None:
+            break
+        if time.monotonic() >= deadline:
+            proc.kill()
+            try:
+                proc.wait(timeout=2)
+            except Exception:
+                pass
+            _cleanup_glob(out_template)
+            return DownloadResult(error_category="timeout", error_raw="download timed out")
+        time.sleep(0.2)
 
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=2)
-
-    err_thread.join(timeout=2)
+    out_thread.join(timeout=3)
+    err_thread.join(timeout=3)
     stderr_text = "".join(stderr_buf)
 
     if proc.returncode != 0:

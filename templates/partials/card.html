@@ -81,8 +81,8 @@
   data-job-id="{{ card.id }}"
   data-status="downloading"
   hx-get="/api/status-card/{{ card.id }}"
-  hx-trigger="every 1s"
-  hx-swap="outerHTML"
+  hx-trigger="every 2s"
+  hx-swap="outerHTML transition:true"
 >
   {{ thumb(card) }}
   <div class="clip-body">
