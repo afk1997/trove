@@ -26,7 +26,8 @@ RUN apt-get update && \
 RUN useradd -m -u 1000 trove
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir -U yt-dlp
+# requirements.txt installs yt-dlp from its master branch (current YouTube extractors).
+RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py jobs.py runner.py safety.py ./
 COPY templates/ ./templates/
 COPY static/ ./static/
