@@ -82,9 +82,242 @@
    ============================================================ */
 
 @layer components {
-  /* (hero components added in Task 3) */
-  /* (card components added in Task 4) */
-  /* (empty-state added in Task 5) */
+
+  /* === HERO ============================================== */
+
+  .hero-stage {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 30px 28px 36px;
+    border-bottom: 1.5px dashed var(--teal);
+    position: relative;
+  }
+
+  .hero-top {
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--teal);
+    padding-bottom: 12px;
+    border-bottom: 1.5px solid var(--teal);
+    margin-bottom: 38px;
+  }
+  .hero-top .left { display: flex; align-items: center; gap: 10px; }
+  .hero-top .dot { width: 6px; height: 6px; background: var(--orange); border-radius: 50%; flex-shrink: 0; }
+  .hero-top .right { color: var(--orange); }
+
+  .hero-mark-row {
+    display: flex; align-items: flex-end; gap: 0;
+  }
+
+  .hero-mark {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: clamp(56px, 12vw, 132px);
+    line-height: 0.82;
+    letter-spacing: -0.04em;
+    color: var(--teal);
+    font-weight: 600;
+    font-variation-settings: 'WONK' 1, 'SOFT' 50, 'opsz' 144;
+    margin: 0;
+  }
+  .hero-mark .period {
+    color: var(--orange);
+    text-shadow: 2px 2.5px 0 var(--offset-shadow);
+    margin-left: 0.05em;
+  }
+
+  .hero-arrow {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: clamp(28px, 6vw, 56px);
+    color: var(--orange);
+    line-height: 1;
+    margin-left: 18px;
+    margin-bottom: 12px;
+    text-shadow: 2px 2.5px 0 var(--offset-shadow);
+    align-self: center;
+  }
+
+  .hero-tag {
+    font-family: 'Fraunces', Georgia, serif;
+    font-style: italic;
+    font-size: 22px;
+    color: var(--teal);
+    font-weight: 400;
+    margin: 14px 0 36px;
+    max-width: 480px;
+    line-height: 1.3;
+  }
+  .hero-tag .accent { color: var(--orange); font-weight: 500; }
+
+  .hero-plate {
+    background: var(--light);
+    border: 1.5px solid var(--teal);
+    border-radius: 4px;
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+    transition: box-shadow 150ms ease-out, border-color 150ms ease-out;
+  }
+  .hero-plate:focus-within {
+    border-color: var(--orange);
+    box-shadow: 4px 4px 0 var(--orange);
+  }
+  .hero-plate:focus-within .hero-plate-header {
+    background: var(--orange);
+  }
+  .hero-plate:focus-within .hero-input { background: #fff9ea; }
+
+  .hero-plate-header {
+    background: var(--teal);
+    color: var(--paper);
+    padding: 6px 14px 5px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    display: flex; justify-content: space-between; align-items: center;
+    transition: background 150ms ease-out;
+  }
+  .hero-plate-header .step { color: var(--orange); }
+
+  .hero-input-row { padding: 16px 18px 14px; display: flex; align-items: center; gap: 10px; }
+
+  .hero-input {
+    flex: 1;
+    font-family: 'Inter', sans-serif;
+    font-size: 17px;
+    color: var(--teal);
+    background: transparent;
+    border: none;
+    outline: none;
+    transition: background 150ms ease-out;
+    min-width: 0;
+    caret-color: var(--orange);
+  }
+  .hero-input::placeholder {
+    color: var(--teal);
+    opacity: 0.45;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px;
+  }
+  .hero-input:focus-visible { outline: none; }
+
+  .hero-controls {
+    border-top: 1px dashed rgba(26, 53, 64, 0.35);
+    padding: 12px 18px;
+    display: flex; align-items: center; gap: 10px;
+  }
+
+  .hero-toggle {
+    display: inline-flex;
+    border: 1.5px solid var(--teal);
+    border-radius: 0;
+    overflow: hidden;
+  }
+  .hero-pill {
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    padding: 7px 14px;
+    color: var(--teal);
+    background: transparent;
+    cursor: pointer;
+    border: none;
+    border-right: 1.5px solid var(--teal);
+    transition: background 150ms ease-out, color 150ms ease-out;
+    min-height: 36px;
+  }
+  .hero-pill:last-child { border-right: none; }
+  .hero-pill:hover { background: rgba(26, 53, 64, 0.08); }
+  .hero-pill.is-active {
+    background: var(--teal);
+    color: var(--light);
+  }
+  .hero-pill:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+  .hero-pill:focus-visible {
+    outline: 2px dashed var(--orange);
+    outline-offset: 2px;
+  }
+
+  .hero-cta {
+    margin-left: auto;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    padding: 9px 18px;
+    background: var(--orange);
+    color: var(--light);
+    border: 1.5px solid var(--teal);
+    box-shadow: var(--shadow-stamp-3);
+    transform: rotate(-1.2deg);
+    cursor: pointer;
+    transition: box-shadow 150ms ease-out, transform 80ms ease-out;
+    min-height: 38px;
+  }
+  .hero-cta:hover { box-shadow: 4px 4px 0 var(--teal); }
+  .hero-cta:active {
+    box-shadow: 0 0 0 var(--teal);
+    transform: rotate(-1.2deg) translate(3px, 3px);
+  }
+  .hero-cta:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    box-shadow: 1px 1px 0 var(--teal);
+  }
+  .hero-cta:focus-visible {
+    outline: 2px dashed var(--teal);
+    outline-offset: 2px;
+  }
+  .hero-cta.is-fetching {
+    background: var(--teal);
+    color: var(--light);
+    box-shadow: 3px 3px 0 var(--orange);
+  }
+  .hero-cta.is-fetching .ellipsis { animation: blink 0.8s steps(2) infinite; }
+
+  .hero-ticker {
+    margin-top: 30px;
+    border-top: 1.5px solid var(--teal);
+    padding-top: 14px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    color: var(--teal);
+    text-transform: uppercase;
+    display: flex; justify-content: space-between; gap: 12px;
+  }
+  .hero-ticker .right { color: var(--orange); }
+
+  .hero-corner-stamp {
+    position: absolute;
+    top: 18px; right: 22px;
+    transform: rotate(7deg);
+    border: 2px solid var(--orange);
+    padding: 4px 10px;
+    color: var(--orange);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    background: rgba(255, 87, 40, 0.06);
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  /* === CARDS ============================================== */
+  /* (added in Task 4) */
+
+  /* === EMPTY STATE ======================================== */
+  /* (added in Task 5) */
+
 }
 
 /* ============================================================
