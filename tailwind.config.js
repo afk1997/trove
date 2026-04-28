@@ -5,25 +5,20 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        bg: "var(--bg)",
-        surface: "var(--surface)",
-        fg: "var(--fg)",
-        muted: "var(--muted)",
-        border: "var(--border)",
-        accent: "var(--accent)",
-        "accent-hover": "var(--accent-hover)",
-        success: "var(--success)",
-        error: "var(--error)",
+        paper: "var(--paper)",
+        light: "var(--light)",
+        teal: "var(--teal)",
+        orange: "var(--orange)",
+        forest: "var(--forest)",
       },
       fontFamily: {
         sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        display: ["Fraunces", "Playfair Display", "Georgia", "serif"],
+        mono: ["IBM Plex Mono", "ui-monospace", "monospace"],
       },
       borderRadius: {
-        DEFAULT: "14px",
-        lg: "18px",
-      },
-      boxShadow: {
-        card: "0 2px 8px rgba(0,0,0,0.04)",
+        DEFAULT: "4px",
+        lg: "8px",
       },
     },
   },
