@@ -1,0 +1,1608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>trove. — brand system</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..600;1,9..144,400..500&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    /* =================================================================
+       TROVE — RISO ZINE BRAND SYSTEM (self-contained)
+       Drop this file anywhere. It loads three fonts from Google Fonts
+       and renders the entire brand book inline.
+
+       Source CSS lives in styles/input.css. This document is the
+       canonical reference: every token, every component, every state.
+       ================================================================= */
+
+    :root {
+      /* TWO-INK PALETTE */
+      --paper:        #f1e6cc;
+      --light:        #fef7e3;
+      --teal:         #1a3540;
+      --orange:       #ff5728;
+      --forest:       #1f7a3f;
+
+      /* DERIVED */
+      --halftone:        rgba(255, 87, 40, 0.04);
+      --offset-shadow:   rgba(26, 53, 64, 0.18);
+      --hairline:        rgba(26, 53, 64, 0.18);
+
+      /* HARD OFFSET SHADOWS — never blurred */
+      --shadow-card:        4px 4px 0 var(--teal);
+      --shadow-card-orange: 4px 4px 0 var(--orange);
+      --shadow-stamp:       2px 2px 0 var(--teal);
+      --shadow-stamp-3:     3px 3px 0 var(--teal);
+    }
+
+    html { color-scheme: light; }
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--paper);
+      color: var(--teal);
+      font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+      /* PAPER GRAIN — multi-layer dot pattern */
+      background-image:
+        radial-gradient(circle at 12% 18%, rgba(26, 53, 64, 0.05) 0.5px, transparent 1px),
+        radial-gradient(circle at 78% 38%, rgba(26, 53, 64, 0.06) 0.5px, transparent 1px),
+        radial-gradient(circle at 32% 76%, rgba(26, 53, 64, 0.05) 0.5px, transparent 1px),
+        radial-gradient(circle at 88% 88%, rgba(26, 53, 64, 0.06) 0.5px, transparent 1px),
+        radial-gradient(circle at 50% 50%, rgba(26, 53, 64, 0.04) 0.5px, transparent 1px);
+      background-size: 4px 4px, 5px 5px, 6px 6px, 4px 4px, 7px 7px;
+      background-attachment: fixed;
+    }
+    /* HALFTONE OVERLAY — fluorescent orange dots multiplied across page */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image:
+        repeating-radial-gradient(circle at 0 0, var(--halftone) 0 0.8px, transparent 0.8px 6px);
+      pointer-events: none;
+      mix-blend-mode: multiply;
+      z-index: 100;
+    }
+    ::selection { background: var(--orange); color: var(--light); }
+    a {
+      color: var(--teal);
+      text-decoration: underline;
+      text-decoration-style: dashed;
+      text-underline-offset: 3px;
+    }
+    a:hover { color: var(--orange); }
+
+    /* DOC LAYOUT */
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 56px 32px 96px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* MASTHEAD */
+    .masthead {
+      border-top: 1.5px solid var(--teal);
+      border-bottom: 1.5px solid var(--teal);
+      padding: 12px 0;
+      display: flex; justify-content: space-between; align-items: center;
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+      margin-bottom: 36px;
+    }
+    .masthead .left { display: flex; align-items: center; gap: 10px; }
+    .masthead .dot { width: 6px; height: 6px; background: var(--orange); border-radius: 50%; }
+    .masthead .right { color: var(--orange); }
+
+    /* WORDMARK */
+    .wordmark {
+      font-family: 'Fraunces', Georgia, serif;
+      font-size: clamp(64px, 14vw, 128px);
+      line-height: 0.82;
+      letter-spacing: -0.04em;
+      color: var(--teal);
+      font-weight: 600;
+      font-variation-settings: 'WONK' 1, 'SOFT' 50, 'opsz' 144;
+      margin: 0;
+    }
+    .wordmark .period {
+      color: var(--orange);
+      text-shadow: 2px 2.5px 0 var(--offset-shadow);
+      margin-left: 0.05em;
+    }
+
+    .lede {
+      font-family: 'Fraunces', Georgia, serif;
+      font-style: italic;
+      font-size: clamp(18px, 2vw, 24px);
+      max-width: 620px;
+      margin: 18px 0 4px;
+      line-height: 1.35;
+    }
+    .lede .accent { color: var(--orange); font-weight: 500; }
+
+    /* SECTION HEADINGS */
+    section { margin-top: 64px; }
+    .section-num {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase;
+      color: var(--orange);
+      border: 1.5px solid var(--orange);
+      padding: 4px 10px;
+      display: inline-block;
+      transform: rotate(-1.5deg);
+      background: rgba(255, 87, 40, 0.06);
+      margin-bottom: 16px;
+    }
+    h2 {
+      font-family: 'Fraunces', Georgia, serif;
+      font-size: clamp(32px, 4vw, 56px);
+      line-height: 0.95;
+      letter-spacing: -0.025em;
+      font-weight: 600;
+      font-variation-settings: 'WONK' 1, 'opsz' 96;
+      margin: 0 0 8px;
+      color: var(--teal);
+    }
+    h2 em {
+      color: var(--orange);
+      font-style: italic;
+      font-weight: 400;
+      text-shadow: 1.5px 1.5px 0 var(--offset-shadow);
+    }
+    h3 {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px; letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: var(--teal);
+      margin: 32px 0 12px;
+      padding-bottom: 4px;
+      border-bottom: 1.5px solid var(--teal);
+    }
+    .section-intro {
+      font-size: 15px;
+      line-height: 1.55;
+      max-width: 620px;
+      margin: 0 0 24px;
+      color: var(--teal);
+    }
+
+    /* CODE BLOCKS */
+    pre, code {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0;
+    }
+    pre {
+      background: var(--light);
+      border: 1.5px solid var(--teal);
+      border-radius: 4px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      box-shadow: var(--shadow-stamp);
+      line-height: 1.45;
+      color: var(--teal);
+      margin: 12px 0;
+    }
+    code:not(pre code) {
+      background: rgba(26, 53, 64, 0.08);
+      padding: 1px 5px;
+      border-radius: 2px;
+      font-size: 0.92em;
+    }
+    .label {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase;
+      color: var(--teal); opacity: 0.6;
+      margin: 6px 0 0;
+    }
+
+    /* PALETTE */
+    .palette {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 14px;
+    }
+    .swatch {
+      border: 1.5px solid var(--teal);
+      border-radius: 4px;
+      padding: 14px 16px;
+      min-height: 120px;
+      display: flex; flex-direction: column; justify-content: space-between;
+      box-shadow: var(--shadow-stamp);
+    }
+    .swatch .name {
+      font-family: 'Fraunces', serif;
+      font-style: italic;
+      font-size: 22px;
+      font-weight: 500;
+    }
+    .swatch .hex {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+    }
+    .swatch .role {
+      font-size: 11px;
+      line-height: 1.4;
+      margin-top: 8px;
+    }
+
+    /* TYPOGRAPHY SPECIMENS */
+    .specimen {
+      border: 1.5px solid var(--teal);
+      background: var(--light);
+      border-radius: 4px;
+      padding: 22px 24px;
+      box-shadow: var(--shadow-stamp);
+      margin: 12px 0;
+    }
+    .spec-display {
+      font-family: 'Fraunces', serif;
+      font-size: 56px;
+      line-height: 0.95;
+      font-weight: 600;
+      font-variation-settings: 'WONK' 1, 'SOFT' 50, 'opsz' 144;
+      letter-spacing: -0.04em;
+      color: var(--teal);
+      margin: 0;
+    }
+    .spec-italic {
+      font-family: 'Fraunces', serif;
+      font-style: italic;
+      font-size: 24px;
+      font-weight: 400;
+      color: var(--teal);
+      margin: 0;
+    }
+    .spec-ui {
+      font-family: 'Inter', sans-serif;
+      font-size: 16px;
+      color: var(--teal);
+      margin: 0;
+    }
+    .spec-mono {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px; letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--teal);
+      margin: 0;
+    }
+
+    .type-row {
+      display: grid;
+      grid-template-columns: 130px 1fr;
+      gap: 14px;
+      padding: 12px 0;
+      border-bottom: 1px dashed var(--hairline);
+      align-items: baseline;
+    }
+    .type-row:last-child { border-bottom: none; }
+    .type-meta {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      color: var(--teal); opacity: 0.6;
+      margin-top: 4px;
+    }
+
+    /* COMPONENT — BUTTONS */
+    .btn-primary {
+      font-family: 'Inter', sans-serif;
+      font-size: 13px; font-weight: 700;
+      letter-spacing: 0.22em; text-transform: uppercase;
+      padding: 9px 18px;
+      background: var(--orange);
+      color: var(--light);
+      border: 1.5px solid var(--teal);
+      box-shadow: var(--shadow-stamp-3);
+      transform: rotate(-1.2deg);
+      cursor: pointer;
+      transition: box-shadow 150ms ease-out, transform 80ms ease-out;
+    }
+    .btn-primary:hover { box-shadow: 4px 4px 0 var(--teal); }
+    .btn-primary:active { box-shadow: none; transform: rotate(-1.2deg) translate(3px, 3px); }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: 1px 1px 0 var(--teal); }
+    .btn-primary:focus-visible { outline: 2px dashed var(--teal); outline-offset: 2px; }
+
+    .btn-fetching {
+      background: var(--teal); color: var(--light);
+      box-shadow: 3px 3px 0 var(--orange);
+    }
+
+    /* COMPONENT — TOGGLE */
+    .toggle {
+      display: inline-flex;
+      border: 1.5px solid var(--teal);
+      border-radius: 0;
+      overflow: hidden;
+    }
+    .pill {
+      font-family: 'Inter', sans-serif;
+      font-size: 12px; font-weight: 600;
+      letter-spacing: 0.14em;
+      padding: 7px 14px;
+      color: var(--teal);
+      background: transparent;
+      cursor: pointer;
+      border: none;
+      border-right: 1.5px solid var(--teal);
+      transition: background 150ms ease-out, color 150ms ease-out;
+      min-height: 36px;
+    }
+    .pill:last-child { border-right: none; }
+    .pill:hover { background: rgba(26, 53, 64, 0.08); }
+    .pill.is-active { background: var(--teal); color: var(--light); }
+    .pill:focus-visible { outline: 2px dashed var(--orange); outline-offset: 2px; }
+    .pill:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+
+    /* COMPONENT — INPUT */
+    .field {
+      display: flex; align-items: center; gap: 10px;
+      padding: 14px 18px;
+      background: var(--light);
+      border: 1.5px solid var(--teal);
+      border-radius: 4px;
+      box-shadow: var(--shadow-card);
+      max-width: 560px;
+    }
+    .field input {
+      flex: 1;
+      font-family: 'Inter', sans-serif;
+      font-size: 17px;
+      color: var(--teal);
+      background: transparent;
+      border: none;
+      outline: none;
+      caret-color: var(--orange);
+    }
+    .field input::placeholder {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 14px;
+      color: var(--teal); opacity: 0.45;
+    }
+
+    /* COMPONENT — PLATE (full hero plate) */
+    .plate {
+      background: var(--light);
+      border: 1.5px solid var(--teal);
+      border-radius: 4px;
+      box-shadow: var(--shadow-card);
+      overflow: hidden;
+      transition: box-shadow 150ms ease-out, border-color 150ms ease-out;
+      max-width: 600px;
+    }
+    .plate:focus-within {
+      border-color: var(--orange);
+      box-shadow: 4px 4px 0 var(--orange);
+    }
+    .plate-header {
+      background: var(--teal);
+      color: var(--paper);
+      padding: 6px 14px 5px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px; letter-spacing: 0.28em;
+      text-transform: uppercase;
+      display: flex; justify-content: space-between; align-items: center;
+      transition: background 150ms ease-out;
+    }
+    .plate-header .step { color: var(--orange); }
+    .plate:focus-within .plate-header { background: var(--orange); }
+    .plate:focus-within input { background: #fff9ea; }
+    .plate-input-row {
+      padding: 16px 18px 14px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .plate-input-row input {
+      flex: 1;
+      font-family: 'Inter', sans-serif;
+      font-size: 17px;
+      color: var(--teal);
+      background: transparent;
+      border: none;
+      outline: none;
+      caret-color: var(--orange);
+      min-width: 0;
+    }
+    .plate-input-row input::placeholder {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 14px;
+      color: var(--teal); opacity: 0.45;
+    }
+    .plate-controls {
+      border-top: 1px dashed var(--hairline);
+      padding: 12px 18px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .plate .btn-primary { margin-left: auto; }
+
+    /* COMPONENT — STAMPS */
+    .stamp-row { display: flex; flex-wrap: wrap; gap: 16px 22px; align-items: flex-start; }
+    .stamp-row > div { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+    .stamp-corner {
+      border: 2px solid var(--orange);
+      padding: 4px 10px;
+      color: var(--orange);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px; letter-spacing: 0.25em; text-transform: uppercase;
+      background: rgba(255, 87, 40, 0.06);
+      transform: rotate(7deg);
+    }
+    .stamp-saving {
+      font-family: 'Inter', sans-serif;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase;
+      color: var(--orange);
+      border: 1.5px solid var(--orange);
+      padding: 4px 10px;
+      background: rgba(255, 87, 40, 0.08);
+      transform: rotate(-1.5deg);
+    }
+    .stamp-saved {
+      font-family: 'Inter', sans-serif;
+      font-size: 12px; font-weight: 800; letter-spacing: 0.22em; text-transform: uppercase;
+      color: var(--light);
+      background: var(--forest);
+      border: 1.5px solid var(--teal);
+      padding: 6px 14px;
+      box-shadow: var(--shadow-stamp);
+      transform: rotate(2.5deg);
+    }
+    .stamp-cancelled {
+      font-family: 'Inter', sans-serif;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase;
+      color: var(--teal);
+      border: 1.5px dashed var(--teal);
+      padding: 5px 11px;
+      background: transparent;
+      transform: rotate(-3deg);
+    }
+    .stamp-error {
+      font-family: 'Inter', sans-serif;
+      font-size: 11px; font-weight: 800; letter-spacing: 0.25em; text-transform: uppercase;
+      color: var(--light);
+      background: var(--orange);
+      border: 1.5px solid var(--teal);
+      padding: 6px 12px;
+      box-shadow: var(--shadow-stamp);
+      transform: rotate(3deg);
+    }
+
+    /* COMPONENT — CLIP CARD (5 STATES) */
+    .clip {
+      background: var(--light);
+      border: 1.5px solid var(--teal);
+      border-radius: 4px;
+      box-shadow: var(--shadow-card);
+      padding: 0;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 116px 1fr auto;
+      gap: 0;
+      position: relative;
+      max-width: 720px;
+      margin: 18px 0;
+    }
+    .clip-num {
+      position: absolute;
+      top: -8px; left: 12px;
+      background: var(--light);
+      padding: 0 6px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px; letter-spacing: 0.3em;
+      color: var(--teal);
+      z-index: 2;
+      border: 1.5px solid var(--teal);
+      line-height: 14px;
+    }
+    .clip-thumb {
+      width: 116px; height: 80px;
+      background: var(--teal);
+      overflow: hidden;
+      border-right: 1.5px solid var(--teal);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--paper);
+      position: relative;
+      flex-shrink: 0;
+    }
+    .clip-thumb svg { width: 28px; height: 28px; opacity: 0.55; position: relative; z-index: 1; }
+    .clip-thumb::before {
+      content: ''; position: absolute; inset: 0;
+      background-image: repeating-radial-gradient(circle at 0 0, rgba(254, 247, 227, 0.18) 0 0.8px, transparent 0.8px 4px);
+      mix-blend-mode: overlay;
+      pointer-events: none;
+    }
+    .clip-body {
+      padding: 14px 16px;
+      display: flex; flex-direction: column; justify-content: center; gap: 4px;
+      min-width: 0;
+    }
+    .clip-title {
+      font-family: 'Fraunces', serif;
+      font-size: 18px; font-weight: 600;
+      color: var(--teal);
+      line-height: 1.15;
+      letter-spacing: -0.01em;
+      font-variation-settings: 'WONK' 1, 'opsz' 24;
+      margin: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .clip-meta {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px; letter-spacing: 0.14em;
+      color: var(--teal); opacity: 0.6;
+      text-transform: uppercase;
+      margin: 2px 0 0;
+    }
+    .clip-meta .sep { color: var(--orange); opacity: 0.7; margin: 0 4px; }
+    .clip-action {
+      display: flex; flex-direction: column; align-items: stretch;
+      justify-content: center; gap: 8px;
+      padding: 14px 16px 14px 4px;
+      border-left: 1px dashed var(--hairline);
+    }
+    .clip-save {
+      font-family: 'Inter', sans-serif;
+      font-size: 11px; font-weight: 700;
+      letter-spacing: 0.22em; text-transform: uppercase;
+      background: var(--orange);
+      color: var(--light);
+      border: 1.5px solid var(--teal);
+      padding: 7px 16px;
+      box-shadow: var(--shadow-stamp);
+      transform: rotate(-1deg);
+      cursor: pointer;
+    }
+    .clip-picker {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px; letter-spacing: 0.14em;
+      text-transform: uppercase;
+      border: 1.5px solid var(--teal);
+      background: var(--paper);
+      color: var(--teal);
+      padding: 4px 8px;
+      cursor: pointer;
+    }
+
+    .clip.is-downloading {
+      border-color: var(--orange);
+      box-shadow: var(--shadow-card-orange);
+    }
+    .clip.is-downloading .clip-thumb { border-right-color: var(--orange); }
+    .clip.is-downloading .clip-num { border-color: var(--orange); color: var(--orange); }
+    .clip.is-downloading .clip-action { border-left-color: rgba(255, 87, 40, 0.4); }
+
+    .clip-progress {
+      grid-column: 1 / -1;
+      height: 8px;
+      background:
+        repeating-linear-gradient(45deg,
+          var(--teal) 0, var(--teal) 4px,
+          var(--light) 4px, var(--light) 8px);
+      border-top: 1.5px solid var(--orange);
+      position: relative;
+      overflow: hidden;
+    }
+    .clip-progress-fill {
+      position: absolute;
+      top: 0; left: 0; bottom: 0;
+      background: var(--orange);
+      z-index: 1;
+      box-shadow: 1px 0 0 rgba(0, 0, 0, 0.18);
+    }
+
+    .clip.is-cancelled {
+      opacity: 0.55;
+      border-style: dashed;
+      box-shadow: none;
+    }
+    .clip.is-cancelled .clip-title {
+      text-decoration: line-through;
+      text-decoration-color: var(--orange);
+    }
+
+    .clip.is-error {
+      background:
+        repeating-linear-gradient(135deg,
+          var(--light) 0, var(--light) 8px,
+          rgba(255, 87, 40, 0.08) 8px, rgba(255, 87, 40, 0.08) 9px);
+      border-color: var(--orange);
+      box-shadow: var(--shadow-card-orange);
+    }
+    .clip.is-error .clip-num { border-color: var(--orange); color: var(--orange); }
+    .clip.is-error .clip-thumb {
+      background: var(--orange);
+      border-right-color: var(--orange);
+      color: var(--light);
+    }
+    .clip.is-error .clip-thumb svg { opacity: 1; color: var(--light); }
+    .clip.is-error .clip-title {
+      color: var(--orange);
+      font-style: italic;
+      text-transform: lowercase;
+    }
+    .clip-err-msg {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      color: var(--teal);
+      margin: 2px 0 0;
+    }
+    .clip-err-url {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px;
+      color: var(--teal); opacity: 0.5;
+      margin-top: 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .clip.is-done .clip-meta-path {
+      color: var(--forest);
+      text-transform: none;
+      letter-spacing: 0.04em;
+      font-size: 11px;
+      opacity: 1;
+    }
+    .clip-download-again {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--teal);
+      text-decoration: underline;
+      text-decoration-style: dashed;
+      text-underline-offset: 3px;
+      cursor: pointer;
+      width: fit-content;
+      margin-top: 6px;
+      display: inline-block;
+    }
+    .clip-download-again:hover { text-decoration-style: solid; color: var(--orange); }
+
+    /* COMPONENT — EMPTY STATE */
+    .empty-hint {
+      text-align: center;
+      padding: 36px 24px;
+      border-top: 1.5px dashed var(--teal);
+      max-width: 720px;
+    }
+    .empty-hint .arrow-up {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 24px;
+      color: var(--orange);
+      opacity: 0.7;
+      margin-bottom: 8px;
+      animation: breathe-up 3s ease-in-out infinite;
+      display: inline-block;
+    }
+    .empty-hint .line-1 {
+      font-family: 'Fraunces', serif;
+      font-style: italic;
+      font-size: 18px;
+      margin: 0;
+    }
+    .empty-hint .line-2 {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+      color: var(--teal); opacity: 0.55;
+      margin: 6px 0 0;
+    }
+
+    /* MOTION DEMO */
+    .motion-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 18px;
+    }
+    .motion-card {
+      border: 1.5px solid var(--teal);
+      background: var(--light);
+      border-radius: 4px;
+      padding: 14px 16px;
+      box-shadow: var(--shadow-stamp);
+    }
+    .motion-card h4 {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+      color: var(--orange);
+      margin: 0 0 6px;
+    }
+    .motion-card .timing {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      color: var(--teal);
+      opacity: 0.6;
+      margin: 0 0 10px;
+    }
+    .motion-card .desc {
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    /* MOTION KEYFRAMES (used here for the breathing arrow + saved-stamp demo) */
+    @keyframes breathe-up {
+      0%, 100% { transform: translateY(0); opacity: 0.55; }
+      50%      { transform: translateY(-3px); opacity: 0.85; }
+    }
+    @keyframes blink { to { opacity: 0; } }
+    @keyframes card-in {
+      0%   { opacity: 0; transform: translateY(-6px) rotate(-0.6deg); }
+      60%  { opacity: 1; }
+      100% { opacity: 1; transform: translateY(0) rotate(0deg); }
+    }
+    @keyframes scan {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(350%); }
+    }
+    @keyframes stamp-slam {
+      0%   { opacity: 0; transform: rotate(8deg) scale(2.2); }
+      60%  { opacity: 1; }
+      100% { opacity: 1; transform: rotate(2.5deg) scale(1); }
+    }
+    @keyframes ink-burst {
+      0%   { opacity: 0; transform: scale(0.5); }
+      20%  { opacity: 0.6; }
+      100% { opacity: 0; transform: scale(2.2); }
+    }
+
+    .ellipsis-blink { animation: blink 1s steps(2) infinite; }
+
+    /* VOICE TABLE */
+    .voice-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    .voice-cell {
+      border: 1.5px solid var(--teal);
+      background: rgba(26, 53, 64, 0.025);
+      padding: 16px 18px;
+      border-radius: 4px;
+      position: relative;
+    }
+    .voice-cell.do { border-color: var(--forest); }
+    .voice-cell.dont { border-color: var(--orange); opacity: 0.92; }
+    .voice-cell::before {
+      position: absolute; top: -9px; left: 12px;
+      background: var(--paper); padding: 0 6px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px; letter-spacing: 0.3em; text-transform: uppercase;
+    }
+    .voice-cell.do::before { content: 'DO'; color: var(--forest); }
+    .voice-cell.dont::before { content: 'DON\'T'; color: var(--orange); }
+    .voice-cell .ex {
+      font-family: 'Fraunces', Georgia, serif;
+      font-style: italic; font-size: 18px;
+      color: var(--teal); line-height: 1.25;
+      margin: 0 0 6px;
+    }
+    .voice-cell .why {
+      font-size: 11px; color: var(--teal); opacity: 0.7; line-height: 1.4;
+      margin: 0;
+    }
+
+    /* TWO-COLUMN GRID */
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    /* MICROCOPY TABLE */
+    table.copy-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      background: var(--light);
+      border: 1.5px solid var(--teal);
+      box-shadow: var(--shadow-stamp);
+    }
+    table.copy-table th, table.copy-table td {
+      padding: 9px 12px;
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px dashed var(--hairline);
+    }
+    table.copy-table th {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9px; letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--orange);
+      background: rgba(26, 53, 64, 0.04);
+    }
+    table.copy-table td:first-child {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px; letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--teal);
+      width: 38%;
+    }
+    table.copy-table td:last-child {
+      font-family: 'Fraunces', serif;
+      font-style: italic;
+      color: var(--teal);
+      font-size: 14px;
+    }
+    table.copy-table tr:last-child td { border-bottom: none; }
+
+    /* RULES LIST */
+    ul.rules {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    ul.rules li {
+      padding: 6px 0 6px 22px;
+      position: relative;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--teal);
+    }
+    ul.rules li::before {
+      content: '◆';
+      position: absolute; left: 0; top: 6px;
+      color: var(--orange);
+      font-size: 9px;
+    }
+
+    /* REDUCED MOTION */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+      .empty-hint .arrow-up { animation: none; opacity: 0.55; }
+      .ellipsis-blink { animation: none; opacity: 1; }
+    }
+
+    /* FOOTER */
+    .footer {
+      margin-top: 80px;
+      padding-top: 24px;
+      border-top: 1.5px solid var(--teal);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px; letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--teal);
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+    }
+    .footer .right { color: var(--orange); }
+
+    /* RESPONSIVE */
+    @media (max-width: 720px) {
+      .container { padding: 32px 18px 64px; }
+      .two-col, .voice-grid { grid-template-columns: 1fr; }
+      .clip { grid-template-columns: 1fr; }
+      .clip-thumb { width: 100%; height: 96px; border-right: none; border-bottom: 1.5px solid var(--teal); }
+      .clip-action { border-left: none; border-top: 1px dashed var(--hairline); flex-direction: row; align-items: center; gap: 10px; padding: 12px 16px; }
+      .clip.is-error .clip-thumb, .clip.is-downloading .clip-thumb { border-right-color: transparent; border-bottom-color: var(--orange); }
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+
+    <!-- =================== MASTHEAD =================== -->
+    <div class="masthead">
+      <div class="left">
+        <span class="dot"></span>
+        <span>TROVE — RISO ZINE BRAND SYSTEM</span>
+      </div>
+      <span class="right">No. 001 / 2026</span>
+    </div>
+
+    <h1 class="wordmark">trove<span class="period">.</span></h1>
+    <p class="lede">a saving machine for the modern web. <span class="accent">no accounts, no upload limits, no telemetry.</span> this document is the canonical reference for every color, font, surface, button, card, stamp, and motion beat in the trove brand.</p>
+
+    <!-- =================== 01 PALETTE =================== -->
+    <section>
+      <span class="section-num">§ 01 · Palette</span>
+      <h2>Two inks on <em>cream stock</em></h2>
+      <p class="section-intro">Trove is printed in two inks on a single paper. Every other "color" you see is the product of those two inks reacting to grain and halftone overlay. Saturation and chroma stay flat — depth comes from offset shadows and registration shift, never from gradients.</p>
+
+      <div class="palette">
+        <div class="swatch" style="background: var(--paper);">
+          <div>
+            <div class="name">paper.</div>
+            <div class="hex">#F1E6CC</div>
+          </div>
+          <div class="role">Page background only. Always paired with the dot grain pattern.</div>
+        </div>
+        <div class="swatch" style="background: var(--light);">
+          <div>
+            <div class="name">light.</div>
+            <div class="hex">#FEF7E3</div>
+          </div>
+          <div class="role">Cards, plates, raised surfaces, input fields.</div>
+        </div>
+        <div class="swatch" style="background: var(--teal); color: var(--light); border-color: var(--teal);">
+          <div>
+            <div class="name">teal ink.</div>
+            <div class="hex">#1A3540</div>
+          </div>
+          <div class="role">Primary text, borders, dividers, default UI fill.</div>
+        </div>
+        <div class="swatch" style="background: var(--orange); color: var(--light); border-color: var(--teal);">
+          <div>
+            <div class="name">flo. red.</div>
+            <div class="hex">#FF5728</div>
+          </div>
+          <div class="role">Accents, stamps, primary CTA, errors, registration offset.</div>
+        </div>
+        <div class="swatch" style="background: var(--forest); color: var(--light); border-color: var(--teal);">
+          <div>
+            <div class="name">forest.</div>
+            <div class="hex">#1F7A3F</div>
+          </div>
+          <div class="role">Single exception to two-ink rule. Used only for the "✓ saved" stamp and the saved file path.</div>
+        </div>
+      </div>
+
+      <h3>Rules</h3>
+      <ul class="rules">
+        <li>Two inks. The page must read as if printed with one paper stock and two passes of ink.</li>
+        <li>Errors reuse <code>--orange</code>. There is no separate red.</li>
+        <li>No gradients. No blurred shadows. No semitransparent orange — use halftone for tints.</li>
+        <li>Paper grain is always present. Texture is the brand.</li>
+      </ul>
+
+      <h3>Tokens</h3>
+<pre>--paper:  #F1E6CC;   /* page bg */
+--light:  #FEF7E3;   /* cards / plates */
+--teal:   #1A3540;   /* primary ink */
+--orange: #FF5728;   /* accent ink */
+--forest: #1F7A3F;   /* saved-state only */
+
+--halftone:        rgba(255, 87, 40, 0.04);
+--offset-shadow:   rgba(26, 53, 64, 0.18);
+--shadow-card:        4px 4px 0 var(--teal);
+--shadow-card-orange: 4px 4px 0 var(--orange);
+--shadow-stamp:       2px 2px 0 var(--teal);
+--shadow-stamp-3:     3px 3px 0 var(--teal);</pre>
+    </section>
+
+    <!-- =================== 02 TEXTURE =================== -->
+    <section>
+      <span class="section-num">§ 02 · Texture</span>
+      <h2>Paper grain &amp; <em>halftone</em></h2>
+      <p class="section-intro">The page background is built from two stacked layers: a five-layer radial-gradient dot pattern (the paper grain), and a fixed-position halftone overlay applied with <code>mix-blend-mode: multiply</code> (the orange "ink" prints over everything). Both stay attached to the viewport so they don't scroll.</p>
+
+<pre>body {
+  background: var(--paper);
+  background-image:
+    radial-gradient(circle at 12% 18%, rgba(26, 53, 64, 0.05) 0.5px, transparent 1px),
+    radial-gradient(circle at 78% 38%, rgba(26, 53, 64, 0.06) 0.5px, transparent 1px),
+    radial-gradient(circle at 32% 76%, rgba(26, 53, 64, 0.05) 0.5px, transparent 1px),
+    radial-gradient(circle at 88% 88%, rgba(26, 53, 64, 0.06) 0.5px, transparent 1px),
+    radial-gradient(circle at 50% 50%, rgba(26, 53, 64, 0.04) 0.5px, transparent 1px);
+  background-size: 4px 4px, 5px 5px, 6px 6px, 4px 4px, 7px 7px;
+  background-attachment: fixed;
+}
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image:
+    repeating-radial-gradient(circle at 0 0, var(--halftone) 0 0.8px, transparent 0.8px 6px);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  z-index: 100;
+}</pre>
+    </section>
+
+    <!-- =================== 03 TYPOGRAPHY =================== -->
+    <section>
+      <span class="section-num">§ 03 · Typography</span>
+      <h2>Three faces, <em>strict roles</em></h2>
+      <p class="section-intro">Fraunces does the talking. Inter does the work. IBM Plex Mono stamps things. Every weight + axis is documented below — never improvise.</p>
+
+      <div class="specimen">
+        <div class="type-row">
+          <div>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.22em;color:var(--orange);">Display</span>
+            <div class="type-meta">Fraunces · 600 · WONK 1 · SOFT 50 · opsz 144</div>
+          </div>
+          <div>
+            <p class="spec-display">trove<span style="color:var(--orange);text-shadow:2px 2.5px 0 var(--offset-shadow);">.</span></p>
+            <p class="label">Wordmark · hero headline · card titles (opsz 24)</p>
+          </div>
+        </div>
+        <div class="type-row">
+          <div>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.22em;color:var(--orange);">Italic</span>
+            <div class="type-meta">Fraunces · 400 italic</div>
+          </div>
+          <div>
+            <p class="spec-italic">a saving machine for the modern web.</p>
+            <p class="label">The single italic line on any page · taglines · empty-state copy</p>
+          </div>
+        </div>
+        <div class="type-row">
+          <div>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.22em;color:var(--orange);">UI / Body</span>
+            <div class="type-meta">Inter · 400 / 500 / 600 / 700</div>
+          </div>
+          <div>
+            <p class="spec-ui">paste a link · MP4 · MP3 · save → · cancel</p>
+            <p class="label">Buttons, labels, controls, body copy when not stamped</p>
+          </div>
+        </div>
+        <div class="type-row">
+          <div>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.22em;color:var(--orange);">Stamps</span>
+            <div class="type-meta">IBM Plex Mono · 400 / 500 · 0.18–0.28em tracking</div>
+          </div>
+          <div>
+            <p class="spec-mono">▶ N°001 · EST 2026 · YT · TT · IG · 1000+</p>
+            <p class="label">Stamps, codes, file paths, source ticker. Always UPPERCASE, always tracked.</p>
+          </div>
+        </div>
+      </div>
+
+      <h3>Single Google Fonts request</h3>
+<pre>&lt;link rel="preconnect" href="https://fonts.googleapis.com"&gt;
+&lt;link rel="preconnect" href="https://fonts.gstatic.com" crossorigin&gt;
+&lt;link href="https://fonts.googleapis.com/css2?
+  family=Fraunces:ital,opsz,wght@0,9..144,400..600;1,9..144,400..500&amp;
+  family=Inter:wght@400;500;600;700&amp;
+  family=IBM+Plex+Mono:wght@400;500&amp;
+  display=swap" rel="stylesheet"&gt;</pre>
+    </section>
+
+    <!-- =================== 04 WORDMARK =================== -->
+    <section>
+      <span class="section-num">§ 04 · Wordmark</span>
+      <h2>trove<em>.</em></h2>
+      <p class="section-intro">Italic Fraunces in teal, with the period printed in fluorescent orange and offset by 2.5px (the orange ink "prints off" by one registration). The wordmark is the only place the offset effect is allowed.</p>
+
+      <div class="specimen" style="text-align: left;">
+        <h1 class="wordmark" style="font-size:96px;">trove<span class="period">.</span></h1>
+      </div>
+
+<pre>.wordmark {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: clamp(56px, 12vw, 132px);
+  line-height: 0.82;
+  letter-spacing: -0.04em;
+  font-weight: 600;
+  font-variation-settings: 'WONK' 1, 'SOFT' 50, 'opsz' 144;
+  color: var(--teal);
+}
+.wordmark .period {
+  color: var(--orange);
+  text-shadow: 2px 2.5px 0 var(--offset-shadow);
+  margin-left: 0.05em;
+}</pre>
+    </section>
+
+    <!-- =================== 05 BUTTONS =================== -->
+    <section>
+      <span class="section-num">§ 05 · Buttons</span>
+      <h2>Brass <em>stamps</em></h2>
+      <p class="section-intro">Primary CTAs are orange with a teal border, slightly rotated (-1.2°), and carry a hard offset shadow. Hover grows the shadow 1px (anticipation). Press collapses the shadow and translates the button +3px,+3px (the stamp punching down).</p>
+
+      <div class="specimen" style="display:flex; gap:18px; flex-wrap:wrap; align-items:center;">
+        <button class="btn-primary">Save ↗</button>
+        <button class="btn-primary btn-fetching">Fetching<span class="ellipsis-blink">…</span></button>
+        <button class="btn-primary" disabled>Save ↗</button>
+      </div>
+
+<pre>.btn-primary {
+  font-family: 'Inter', sans-serif;
+  font-size: 13px; font-weight: 700;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  padding: 9px 18px;
+  background: var(--orange);
+  color: var(--light);
+  border: 1.5px solid var(--teal);
+  box-shadow: 3px 3px 0 var(--teal);
+  transform: rotate(-1.2deg);
+  cursor: pointer;
+  transition: box-shadow 150ms ease-out, transform 80ms ease-out;
+}
+.btn-primary:hover  { box-shadow: 4px 4px 0 var(--teal); }
+.btn-primary:active { box-shadow: none; transform: rotate(-1.2deg) translate(3px, 3px); }
+.btn-primary:disabled    { opacity: 0.4; box-shadow: 1px 1px 0 var(--teal); cursor: not-allowed; }
+.btn-primary:focus-visible { outline: 2px dashed var(--teal); outline-offset: 2px; }
+
+/* Fetching state — color-inverted with orange shadow */
+.btn-primary.is-fetching {
+  background: var(--teal); color: var(--light);
+  box-shadow: 3px 3px 0 var(--orange);
+}</pre>
+    </section>
+
+    <!-- =================== 06 TOGGLE =================== -->
+    <section>
+      <span class="section-num">§ 06 · Toggle</span>
+      <h2>Segmented <em>pill</em></h2>
+      <p class="section-intro">A 1.5px teal frame with a hard internal divider. Active pill: teal fill, cream text. Inactive pill: hover lifts a faint teal background. Disabled (during fetch): 0.4 opacity, pointer-events off.</p>
+
+      <div class="specimen" style="display:flex; gap:18px; flex-wrap:wrap; align-items:center;">
+        <div class="toggle">
+          <button class="pill is-active">MP4</button>
+          <button class="pill">MP3</button>
+        </div>
+        <div class="toggle">
+          <button class="pill" disabled>MP4</button>
+          <button class="pill is-active" disabled>MP3</button>
+        </div>
+      </div>
+
+<pre>.toggle { display: inline-flex; border: 1.5px solid var(--teal); }
+.pill {
+  font-family: 'Inter', sans-serif;
+  font-size: 12px; font-weight: 600;
+  letter-spacing: 0.14em;
+  padding: 7px 14px;
+  color: var(--teal);
+  background: transparent;
+  cursor: pointer;
+  border: none;
+  border-right: 1.5px solid var(--teal);
+  transition: background 150ms ease-out, color 150ms ease-out;
+  min-height: 36px;
+}
+.pill:last-child  { border-right: none; }
+.pill:hover       { background: rgba(26, 53, 64, 0.08); }
+.pill.is-active   { background: var(--teal); color: var(--light); }
+.pill:disabled    { opacity: 0.4; pointer-events: none; cursor: not-allowed; }
+.pill:focus-visible { outline: 2px dashed var(--orange); outline-offset: 2px; }</pre>
+    </section>
+
+    <!-- =================== 07 INPUT & PLATE =================== -->
+    <section>
+      <span class="section-num">§ 07 · Input &amp; Plate</span>
+      <h2>One <em>plate</em>, one purpose</h2>
+      <p class="section-intro">The plate is a single cream surface that frames input + controls together. <code>:focus-within</code> flips the entire plate's border + shadow + header bar to orange, creating a single clear "this is where you're typing" signal. Caret is orange to match.</p>
+
+      <div class="specimen">
+        <form class="plate" onsubmit="event.preventDefault();">
+          <div class="plate-header">
+            <span>▸ <span class="step">STEP 001</span> · paste a link</span>
+            <span>1000+ sources</span>
+          </div>
+          <div class="plate-input-row">
+            <input type="url" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
+          </div>
+          <div class="plate-controls">
+            <div class="toggle">
+              <button type="button" class="pill is-active">MP4</button>
+              <button type="button" class="pill">MP3</button>
+            </div>
+            <button type="submit" class="btn-primary">Save ↗</button>
+          </div>
+        </form>
+      </div>
+      <p class="label">Click into the input — the whole plate flips to orange via <code>:focus-within</code>.</p>
+
+<pre>.plate {
+  background: var(--light);
+  border: 1.5px solid var(--teal);
+  border-radius: 4px;
+  box-shadow: 4px 4px 0 var(--teal);
+  overflow: hidden;
+  transition: box-shadow 150ms ease-out, border-color 150ms ease-out;
+}
+.plate:focus-within {
+  border-color: var(--orange);
+  box-shadow: 4px 4px 0 var(--orange);
+}
+.plate:focus-within .plate-header { background: var(--orange); }
+.plate:focus-within input         { background: #fff9ea; }
+
+.plate-header {
+  background: var(--teal);
+  color: var(--paper);
+  padding: 6px 14px 5px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px; letter-spacing: 0.28em;
+  text-transform: uppercase;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.plate-header .step { color: var(--orange); }
+
+.plate-input-row { padding: 16px 18px 14px; display: flex; gap: 10px; }
+.plate-input-row input {
+  flex: 1; font-family: 'Inter', sans-serif;
+  font-size: 17px; color: var(--teal);
+  background: transparent; border: none; outline: none;
+  caret-color: var(--orange);
+}
+.plate-input-row input::placeholder {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px; color: var(--teal); opacity: 0.45;
+}
+.plate-controls {
+  border-top: 1px dashed rgba(26, 53, 64, 0.18);
+  padding: 12px 18px;
+  display: flex; align-items: center; gap: 10px;
+}</pre>
+    </section>
+
+    <!-- =================== 08 STAMPS =================== -->
+    <section>
+      <span class="section-num">§ 08 · Stamps</span>
+      <h2>Five <em>stamps</em></h2>
+      <p class="section-intro">Stamps are rotated, hard-bordered labels. Each carries one job. The angle and the offset shadow are non-negotiable — that's what makes them stamps and not buttons.</p>
+
+      <div class="specimen">
+        <div class="stamp-row">
+          <div>
+            <span class="stamp-corner">No. 001 / 2026</span>
+            <span class="label">Corner stamp</span>
+          </div>
+          <div>
+            <span class="stamp-saving">Saving<span class="ellipsis-blink">…</span></span>
+            <span class="label">Saving</span>
+          </div>
+          <div>
+            <span class="stamp-saved">✓ saved</span>
+            <span class="label">Saved (the slam)</span>
+          </div>
+          <div>
+            <span class="stamp-cancelled">cancelled</span>
+            <span class="label">Cancelled</span>
+          </div>
+          <div>
+            <span class="stamp-error">✕ ERROR</span>
+            <span class="label">Error</span>
+          </div>
+        </div>
+      </div>
+
+<pre>/* Corner — top-right of hero */
+.stamp-corner {
+  border: 2px solid var(--orange);
+  padding: 4px 10px;
+  color: var(--orange);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px; letter-spacing: 0.25em;
+  text-transform: uppercase;
+  background: rgba(255, 87, 40, 0.06);
+  transform: rotate(7deg);
+}
+
+/* Saving — orange outline, blinking ellipsis */
+.stamp-saving {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--orange);
+  border: 1.5px solid var(--orange);
+  padding: 4px 10px;
+  background: rgba(255, 87, 40, 0.08);
+  transform: rotate(-1.5deg);
+}
+.stamp-saving .ellipsis { animation: blink 1s steps(2) infinite; }
+
+/* Saved — forest fill, slams down on completion */
+.stamp-saved {
+  font-family: 'Inter', sans-serif;
+  font-size: 12px; font-weight: 800;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--light);
+  background: var(--forest);
+  border: 1.5px solid var(--teal);
+  padding: 6px 14px;
+  box-shadow: 2px 2px 0 var(--teal);
+  transform: rotate(2.5deg);
+  animation: stamp-slam 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Cancelled — dashed outline, transparent */
+.stamp-cancelled {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--teal);
+  border: 1.5px dashed var(--teal);
+  padding: 5px 11px;
+  background: transparent;
+  transform: rotate(-3deg);
+}
+
+/* Error — orange fill, sibling of Saved */
+.stamp-error {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px; font-weight: 800;
+  letter-spacing: 0.25em; text-transform: uppercase;
+  color: var(--light);
+  background: var(--orange);
+  border: 1.5px solid var(--teal);
+  padding: 6px 12px;
+  box-shadow: 2px 2px 0 var(--teal);
+  transform: rotate(3deg);
+}</pre>
+    </section>
+
+    <!-- =================== 09 CARD STATES =================== -->
+    <section>
+      <span class="section-num">§ 09 · Cards</span>
+      <h2>Five <em>states</em></h2>
+      <p class="section-intro">Each saved item is a "clip" — cream card with teal border + 4px hard offset shadow + tiny issue-number stamp at top-left. Five visual states share one grid (thumb · body · action) and one set of class modifiers (<code>.is-downloading / .is-done / .is-cancelled / .is-error</code>).</p>
+
+      <h3>Ready</h3>
+      <div class="clip">
+        <span class="clip-num">No. 005</span>
+        <div class="clip-thumb" style="background: linear-gradient(135deg, var(--orange) 0%, #ff8d6e 100%);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21" fill="currentColor"/></svg>
+        </div>
+        <div class="clip-body">
+          <p class="clip-title">how to build a saving machine in python</p>
+          <p class="clip-meta">FIREDOG STUDIO <span class="sep">/</span> 12:47 <span class="sep">/</span> READY</p>
+        </div>
+        <div class="clip-action">
+          <select class="clip-picker"><option>1080P · 38MB</option></select>
+          <button class="clip-save">Save ↗</button>
+        </div>
+      </div>
+
+      <h3>Downloading (with progress)</h3>
+      <div class="clip is-downloading">
+        <span class="clip-num">No. 004</span>
+        <div class="clip-thumb" style="background: radial-gradient(circle at 30% 40%, var(--paper) 0%, transparent 50%), linear-gradient(180deg, var(--teal) 0%, #2a5060 100%);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21" fill="currentColor"/></svg>
+        </div>
+        <div class="clip-body">
+          <p class="clip-title">riso printing — registration offsets explained</p>
+          <p class="clip-meta">2.4 MB <span class="sep">·</span>45%<span class="sep">·</span>FRAG 12/27<span class="sep">·</span>1.2 MB/s</p>
+        </div>
+        <div class="clip-action">
+          <span class="stamp-saving">Saving<span class="ellipsis-blink">…</span></span>
+        </div>
+        <div class="clip-progress">
+          <div class="clip-progress-fill" style="width: 45%;"></div>
+        </div>
+      </div>
+
+      <h3>Done</h3>
+      <div class="clip is-done">
+        <span class="clip-num">No. 003</span>
+        <div class="clip-thumb" style="background: linear-gradient(45deg, var(--teal) 0%, #2a5060 50%, var(--teal) 100%);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21" fill="currentColor"/></svg>
+        </div>
+        <div class="clip-body">
+          <p class="clip-title">werkplaats typografie — 25 years</p>
+          <p class="clip-meta clip-meta-path">→ ~/Downloads/werkplaats-25.mp4</p>
+          <span class="clip-download-again">↓ download again</span>
+        </div>
+        <div class="clip-action">
+          <span class="stamp-saved">✓ saved</span>
+        </div>
+      </div>
+
+      <h3>Cancelled</h3>
+      <div class="clip is-cancelled">
+        <span class="clip-num">No. 002</span>
+        <div class="clip-thumb">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+        </div>
+        <div class="clip-body">
+          <p class="clip-title">[clip name redacted]</p>
+          <p class="clip-meta">CANCELLED BY USER</p>
+        </div>
+        <div class="clip-action">
+          <span class="stamp-cancelled">cancelled</span>
+        </div>
+      </div>
+
+      <h3>Error</h3>
+      <div class="clip is-error">
+        <span class="clip-num">No. 001</span>
+        <div class="clip-thumb">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12" y2="16.5"/></svg>
+        </div>
+        <div class="clip-body">
+          <p class="clip-title">unable to fetch</p>
+          <p class="clip-err-msg">video private or unavailable.</p>
+          <p class="clip-err-url">https://www.youtube.com/watch?v=privateClip123</p>
+        </div>
+        <div class="clip-action">
+          <span class="stamp-error">✕ ERROR</span>
+        </div>
+      </div>
+
+      <h3>State map</h3>
+      <ul class="rules">
+        <li><strong>Ready</strong> — default cream/teal · quality picker + Save stamp at -1°.</li>
+        <li><strong>Downloading</strong> — border + shadow flip orange · halftone progress strip on the bottom edge fills with solid orange · "Saving…" stamp.</li>
+        <li><strong>Done</strong> — meta swaps to forest-green file path · "✓ saved" stamp slams in over a 400ms ink-burst · dashed-underline "↓ download again" link.</li>
+        <li><strong>Cancelled</strong> — opacity 0.55 · dashed border · strikethrough title · dashed "cancelled" stamp at -3°.</li>
+        <li><strong>Error</strong> — 135° hatch background (warning tape) · solid orange thumbnail · italic lowercase orange title · "✕ ERROR" stamp at +3°.</li>
+      </ul>
+    </section>
+
+    <!-- =================== 10 EMPTY STATE =================== -->
+    <section>
+      <span class="section-num">§ 10 · Empty State</span>
+      <h2>A <em>quiet</em> pointer</h2>
+      <p class="section-intro">When no clippings exist yet, a soft hint sits below the hero with a breathing orange arrow. Hides as soon as the first card lands.</p>
+
+      <div class="specimen">
+        <div class="empty-hint">
+          <div class="arrow-up">↑</div>
+          <p class="line-1">your clippings will appear here.</p>
+          <p class="line-2">paste a link above to begin</p>
+        </div>
+      </div>
+
+<pre>.empty-hint {
+  text-align: center;
+  padding: 36px 24px;
+  border-top: 1.5px dashed var(--teal);
+}
+.empty-hint .arrow-up {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 24px;
+  color: var(--orange);
+  opacity: 0.7;
+  animation: breathe-up 3s ease-in-out infinite;
+  display: inline-block;
+}
+.empty-hint .line-1 {
+  font-family: 'Fraunces', serif;
+  font-style: italic;
+  font-size: 18px;
+}
+.empty-hint .line-2 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+  opacity: 0.55;
+}</pre>
+    </section>
+
+    <!-- =================== 11 MOTION =================== -->
+    <section>
+      <span class="section-num">§ 11 · Motion</span>
+      <h2>Six <em>beats</em></h2>
+      <p class="section-intro">All motion is CSS-only. Every keyframe and infinite loop is killed by a single <code>@media (prefers-reduced-motion: reduce)</code> block. No spring. No bounce. No parallax. The page is paper, not an app.</p>
+
+      <div class="motion-grid">
+        <div class="motion-card">
+          <h4>1 · Card-in</h4>
+          <p class="timing">280ms · cubic-bezier(.22,1,.36,1)</p>
+          <p class="desc">New clipping translateY(-6px) + rotate(-0.6°) → settles. Reads like paper landing.</p>
+        </div>
+        <div class="motion-card">
+          <h4>2 · Stamp slam ★</h4>
+          <p class="timing">260ms · cubic-bezier(.16,1,.3,1) + 400ms ink-burst</p>
+          <p class="desc">Saved stamp scale 2.2 → 1, rotate 8° → 2.5°, with a green ink-burst ripple. The viral moment.</p>
+        </div>
+        <div class="motion-card">
+          <h4>3 · Halftone scan</h4>
+          <p class="timing">1.4s · linear · infinite</p>
+          <p class="desc">Used for indeterminate loading; replaced by determinate fill once total bytes are known.</p>
+        </div>
+        <div class="motion-card">
+          <h4>4 · Stamp press</h4>
+          <p class="timing">150ms hover · 80ms press</p>
+          <p class="desc">Hover shadow 3 → 4px (anticipation). Press collapses shadow + translates +3,+3. Bounces back on release.</p>
+        </div>
+        <div class="motion-card">
+          <h4>5 · Toggle ink-fill</h4>
+          <p class="timing">220ms · cubic-bezier(.4,0,.2,1)</p>
+          <p class="desc">Active pill text/background swap with smooth 150ms color transition.</p>
+        </div>
+        <div class="motion-card">
+          <h4>6 · Breathing arrow</h4>
+          <p class="timing">3s · ease-in-out · infinite</p>
+          <p class="desc">Empty-state arrow breathes 3px up/down with opacity 0.55→0.85.</p>
+        </div>
+      </div>
+
+      <h3>Reduced-motion fallback</h3>
+<pre>@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}</pre>
+    </section>
+
+    <!-- =================== 12 VOICE =================== -->
+    <section>
+      <span class="section-num">§ 12 · Voice</span>
+      <h2>Plainspoken, <em>off-kilter</em></h2>
+      <p class="section-intro">Lowercase wherever possible. Uppercase only for mono stamps. Verbs are concrete; the metaphor lives in nouns. Never SaaS.</p>
+
+      <div class="voice-grid">
+        <div class="voice-cell do">
+          <p class="ex">"a saving machine for the modern web."</p>
+          <p class="why">Plain, slightly off-kilter, reads like a zine editor's note.</p>
+        </div>
+        <div class="voice-cell dont">
+          <p class="ex">"Effortlessly archive your favorite content from across the web!"</p>
+          <p class="why">Marketing voice. Over-explaining. AI-startup hype. Death.</p>
+        </div>
+        <div class="voice-cell do">
+          <p class="ex" style="font-family:'Inter',sans-serif;font-style:normal;font-weight:600;font-size:14px;letter-spacing:0.04em;">SAVE ↗</p>
+          <p class="why">Verb is concrete. Single arrow. Slight rotation = stamp.</p>
+        </div>
+        <div class="voice-cell dont">
+          <p class="ex" style="font-family:'Inter',sans-serif;font-style:normal;font-weight:600;font-size:14px;">Get Started Free →</p>
+          <p class="why">SaaS verb. Implies a signup. Trove has no account.</p>
+        </div>
+        <div class="voice-cell do">
+          <p class="ex">"nothing here yet. paste a link."</p>
+          <p class="why">Empty states are calm. Lowercase. Periods, not exclamation marks.</p>
+        </div>
+        <div class="voice-cell dont">
+          <p class="ex">"Your trove is empty! 🎯 Get started by pasting your first link!"</p>
+          <p class="why">Emoji. Two exclamations. "Get started." All cardinal sins.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================== 13 MICROCOPY =================== -->
+    <section>
+      <span class="section-num">§ 13 · Microcopy</span>
+      <h2>Every <em>line</em>, locked</h2>
+      <p class="section-intro">Reference table for every visible string in the product. Copy edits go here first, never directly in templates.</p>
+
+      <table class="copy-table">
+        <thead><tr><th>Surface</th><th>Copy</th></tr></thead>
+        <tbody>
+          <tr><td>Top-strip product line</td><td>TROVE — A SAVING MACHINE FOR THE MODERN WEB</td></tr>
+          <tr><td>Wordmark</td><td>trove. (period in orange)</td></tr>
+          <tr><td>Tagline</td><td>paste a link, get the file. <strong>no accounts, no upload limits, no telemetry.</strong> self-hosted on your machine.</td></tr>
+          <tr><td>Plate header</td><td>▸ STEP 001 · paste a link  ·  1000+ sources</td></tr>
+          <tr><td>Input placeholder</td><td>https://www.youtube.com/watch?v=…</td></tr>
+          <tr><td>Format pills</td><td>MP4 / MP3</td></tr>
+          <tr><td>Primary CTA (idle)</td><td>Save ↗</td></tr>
+          <tr><td>Primary CTA (in-flight)</td><td>Fetching…</td></tr>
+          <tr><td>Source ticker (left)</td><td>▼ youtube · tiktok · instagram · vimeo · 1000+</td></tr>
+          <tr><td>Source ticker (right)</td><td>MIT · SELF-HOSTED · v1.0</td></tr>
+          <tr><td>Corner stamp</td><td>No. 001 / 2026</td></tr>
+          <tr><td>Empty state line 1</td><td>your clippings will appear here.</td></tr>
+          <tr><td>Empty state line 2</td><td>PASTE A LINK ABOVE TO BEGIN</td></tr>
+          <tr><td>Card meta (ready)</td><td>UPLOADER / DURATION / READY</td></tr>
+          <tr><td>Card meta (downloading)</td><td>x.x MB / y.y MB · NN% · NN MB/s · ETA m:ss</td></tr>
+          <tr><td>Card meta (HLS fallback)</td><td>x.x MB · NN% · FRAG i/n · NN MB/s</td></tr>
+          <tr><td>Card stamp (ready button)</td><td>Save ↗</td></tr>
+          <tr><td>Card stamp (saving)</td><td>Saving… (blinking ellipsis)</td></tr>
+          <tr><td>Card stamp (saved)</td><td>✓ saved</td></tr>
+          <tr><td>Card stamp (cancelled)</td><td>cancelled</td></tr>
+          <tr><td>Card stamp (error)</td><td>✕ ERROR</td></tr>
+          <tr><td>Card meta (done)</td><td>→ ~/Downloads/&lt;filename&gt;</td></tr>
+          <tr><td>Done link</td><td>↓ download again</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- =================== 14 NON-NEGOTIABLES =================== -->
+    <section>
+      <span class="section-num">§ 14 · Non-negotiables</span>
+      <h2>The hard <em>rules</em></h2>
+      <ul class="rules">
+        <li>Riso is a brand-only direction. The interaction model — paste, toggle, save, watch the card — never gets clever.</li>
+        <li>One paste box. One toggle. One button. No required tooltips.</li>
+        <li>Two inks (plus paper). Forest green is the only exception, and only on "✓ saved".</li>
+        <li>Paper grain is always present. Halftone overlay is always present. Texture is the brand.</li>
+        <li>Hard offset shadows only — never blurred.</li>
+        <li>No emoji. No exclamation marks. No SaaS verbs.</li>
+        <li>No gradients on UI. No spring or bounce easing. No parallax.</li>
+        <li>WCAG AA contrast verified for every foreground/background pair.</li>
+        <li><code>prefers-reduced-motion: reduce</code> kills every animation in a single block.</li>
+        <li>Mobile uses the same layout, scaled — never a separate "mobile site".</li>
+        <li>Tap targets ≥ 44px on viewports ≤ 480px.</li>
+      </ul>
+    </section>
+
+    <!-- =================== FOOTER =================== -->
+    <div class="footer">
+      <span>▼ trove · brand book · v1</span>
+      <span class="right">MIT · SELF-HOSTED · MMXXVI</span>
+    </div>
+  </main>
+</body>
+</html>
