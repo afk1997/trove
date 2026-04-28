@@ -12,9 +12,6 @@
     hx-post="/api/info-card"
     hx-target="#queue"
     hx-swap="afterbegin"
-    hx-on::before-request="this.querySelector('[data-fetch-btn]').disabled = true; this.querySelector('[data-fetch-btn]').innerText = 'FETCHING…'"
-    hx-on::after-request="this.querySelector('[data-fetch-btn]').disabled = false; this.querySelector('[data-fetch-btn]').innerText = 'FETCH'; this.reset()"
-    x-data="{ format: 'video' }"
     class="space-y-3"
   >
     <label class="sr-only" for="urls">Paste a link</label>
@@ -30,12 +27,14 @@
       class="panel-input"
     >
 
-    <input type="hidden" name="format" :value="format">
+    <input type="hidden" name="format" id="format-input" value="video">
     <div class="flex gap-2 items-center">
-      <button type="button" class="chip" :data-active="format === 'video'" @click="format = 'video'">MP4</button>
-      <button type="button" class="chip" :data-active="format === 'audio'" @click="format = 'audio'">MP3</button>
+      <div class="format-toggle" role="group" aria-label="Format">
+        <button type="button" class="chip is-active" data-format="video">MP4</button>
+        <button type="button" class="chip" data-format="audio">MP3</button>
+      </div>
       <span class="flex-1"></span>
-      <button type="submit" class="btn-primary" data-fetch-btn>FETCH</button>
+      <button type="submit" class="btn-primary" id="fetch-btn">FETCH</button>
     </div>
   </form>
 
@@ -45,4 +44,37 @@
 
   <div id="queue" aria-live="polite" class="mt-10 space-y-3"></div>
 </div>
+
+<script nonce="{{ g.csp_nonce }}">
+  // Format toggle (vanilla — strict CSP blocks Alpine's eval-based directives)
+  document.querySelectorAll('.format-toggle .chip').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.format-toggle .chip').forEach(function (c) {
+        c.classList.remove('is-active');
+      });
+      btn.classList.add('is-active');
+      document.getElementById('format-input').value = btn.dataset.format;
+    });
+  });
+
+  // FETCH button label state, reset form, persist format selection across resets
+  (function () {
+    var form = document.getElementById('fetch-form');
+    var btn = document.getElementById('fetch-btn');
+    form.addEventListener('htmx:beforeRequest', function () {
+      btn.disabled = true;
+      btn.textContent = 'FETCHING…';
+    });
+    form.addEventListener('htmx:afterRequest', function () {
+      btn.disabled = false;
+      btn.textContent = 'FETCH';
+      var keepFormat = document.getElementById('format-input').value;
+      form.reset();
+      document.getElementById('format-input').value = keepFormat;
+      document.querySelectorAll('.format-toggle .chip').forEach(function (c) {
+        c.classList.toggle('is-active', c.dataset.format === keepFormat);
+      });
+    });
+  })();
+</script>
 {% endblock %}

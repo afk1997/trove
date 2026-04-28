@@ -16,22 +16,39 @@
     {% block content %}{% endblock %}
   </main>
 
-  <script nonce="{{ g.csp_nonce }}" src="{{ url_for('static', filename='vendor/alpine.min.js') }}" defer></script>
   <script nonce="{{ g.csp_nonce }}" src="{{ url_for('static', filename='vendor/htmx.min.js') }}"></script>
   <script nonce="{{ g.csp_nonce }}">
+    // Track active downloads so we can sendBeacon a cancel on tab close.
     window.__troveActiveJobs = new Set();
-    window.addEventListener('beforeunload', function() {
+    window.addEventListener('beforeunload', function () {
       for (var id of window.__troveActiveJobs) {
         try { navigator.sendBeacon('/api/job/' + id + '/cancel'); } catch (_) {}
       }
     });
-    document.addEventListener('htmx:afterSwap', function() {
+    function refreshActiveJobs() {
       var active = new Set();
-      document.querySelectorAll('[data-job-id][data-status="downloading"]').forEach(function(el) {
+      document.querySelectorAll('[data-job-id][data-status="downloading"]').forEach(function (el) {
         active.add(el.dataset.jobId);
       });
       window.__troveActiveJobs = active;
+    }
+    // Auto-trigger the browser download as soon as a card flips to DONE,
+    // so the file lands in ~/Downloads with no second click.
+    function autoDownloadDone() {
+      document.querySelectorAll('[data-status="done"]:not([data-auto-downloaded])').forEach(function (card) {
+        card.setAttribute('data-auto-downloaded', '1');
+        var a = card.querySelector('a[href^="/api/file/"]');
+        if (a) {
+          // The <a download> attribute makes this a save, not a navigation.
+          a.click();
+        }
+      });
+    }
+    document.addEventListener('htmx:afterSwap', function () {
+      refreshActiveJobs();
+      autoDownloadDone();
     });
+    document.addEventListener('htmx:load', refreshActiveJobs);
   </script>
 </body>
 </html>

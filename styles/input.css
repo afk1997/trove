@@ -154,23 +154,62 @@
     align-items: center;
     justify-content: center;
     min-height: 40px;
-    padding: 0 14px;
+    padding: 0 16px;
     background: transparent;
     color: var(--muted);
     border: 1px solid var(--border);
     border-radius: 6px;
     font-family: 'VT323', 'IBM Plex Mono', ui-monospace, monospace;
     font-size: 16px;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.12em;
     cursor: pointer;
     transition: all 0.15s;
   }
   .chip:hover { border-color: var(--accent); color: var(--accent); }
+  .chip.is-active,
   .chip[data-active="true"] {
-    background: var(--accent-soft);
+    background: var(--accent);
     border-color: var(--accent);
-    color: var(--accent);
-    text-shadow: 0 0 8px rgba(255, 158, 42, 0.6);
+    color: var(--bg);
+    text-shadow: none;
+    box-shadow: 0 0 18px rgba(255, 158, 42, 0.55);
+  }
+
+  .format-toggle {
+    display: inline-flex;
+    gap: 6px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+  }
+  .format-toggle .chip { border: 1px solid transparent; min-height: 36px; padding: 0 14px; }
+
+  /* Indeterminate progress bar (hx-preserve keeps animation across polls) */
+  .progress-track {
+    position: relative;
+    width: 100%;
+    height: 4px;
+    margin-top: 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    position: absolute;
+    inset: 0;
+    width: 35%;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      var(--accent) 50%,
+      transparent 100%);
+    box-shadow: 0 0 10px rgba(255, 158, 42, 0.6);
+    animation: progress-slide 1.6s linear infinite;
+  }
+  @keyframes progress-slide {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(380%); }
   }
 
   .btn-primary {

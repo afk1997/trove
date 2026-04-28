@@ -10,9 +10,21 @@
   "unknown": "something went wrong",
 } %}
 
+{% macro thumb(card) %}
+<div class="card-thumb">
+  {% if card.thumbnail %}
+    <img src="{{ card.thumbnail }}" alt="" loading="lazy">
+  {% else %}
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <rect x="2" y="2" width="20" height="20" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="m21 15-5-5L5 21"/>
+    </svg>
+  {% endif %}
+</div>
+{% endmacro %}
+
 {% if card.kind == "error" %}
 <div class="card" data-status="error">
-  <div class="card-thumb">
+  <div class="card-thumb" style="color: var(--error)">
     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
       <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12" y2="16.5"/>
     </svg>
@@ -28,15 +40,7 @@
 
 {% elif card.kind == "ready" %}
 <div class="card" data-status="ready">
-  <div class="card-thumb">
-    {% if card.thumbnail %}
-      <img src="{{ card.thumbnail }}" alt="" loading="lazy">
-    {% else %}
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <rect x="2" y="2" width="20" height="20" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="m21 15-5-5L5 21"/>
-      </svg>
-    {% endif %}
-  </div>
+  {{ thumb(card) }}
   <div class="flex-1 min-w-0">
     <p class="card-title">{{ card.title or "Untitled" }}</p>
     <p class="card-meta">
@@ -51,6 +55,7 @@
     >
       <input type="hidden" name="url" value="{{ card.url }}">
       <input type="hidden" name="title" value="{{ card.title or '' }}">
+      <input type="hidden" name="thumbnail" value="{{ card.thumbnail or '' }}">
       <input type="hidden" name="format" value="{{ card.format or 'video' }}">
       {% if card.formats and (card.format or 'video') == 'video' %}
         <select name="format_id" class="chip" style="padding: 0 8px; cursor: pointer">
@@ -70,31 +75,30 @@
   data-status="downloading"
   data-job-id="{{ card.id }}"
   hx-get="/api/status-card/{{ card.id }}"
-  hx-trigger="every 1s"
+  hx-trigger="every 2s"
   hx-swap="outerHTML"
 >
-  <div class="card-thumb static-shimmer"></div>
+  {{ thumb(card) }}
   <div class="flex-1 min-w-0">
     <p class="card-title">{{ card.title or "Untitled" }}</p>
-    <p class="card-status blink" data-color="amber" style="margin-top: 8px">SAVING</p>
+    <div class="progress-track">
+      <div class="progress-fill"></div>
+    </div>
+    <p class="card-status" data-color="amber" style="margin-top: 8px">SAVING…</p>
   </div>
 </div>
 
 {% elif card.kind == "done" %}
 <div class="card" data-status="done">
-  <div class="card-thumb" style="color: var(--success)">
-    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-      <polyline points="20 6 9 17 4 12"/>
-    </svg>
-  </div>
+  {{ thumb(card) }}
   <div class="flex-1 min-w-0">
     <p class="card-title">{{ card.title or "Untitled" }}</p>
-    <p class="card-status" data-color="green" style="margin-top: 4px">SAVED</p>
+    <p class="card-status" data-color="green" style="margin-top: 4px">SAVED → ~/Downloads</p>
     <a
       href="/api/file/{{ card.id }}"
       download="{{ card.filename or '' }}"
       class="btn-link mt-3 inline-flex"
-    >↓ download {{ card.filename or "file" }}</a>
+    >↓ download again</a>
   </div>
 </div>
 

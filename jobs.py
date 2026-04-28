@@ -24,6 +24,7 @@ class Job:
     url: str
     title: str
     status: JobStatus = JobStatus.QUEUED
+    thumbnail: str = ""
     file_path: str | None = None
     filename: str | None = None
     error_category: str | None = None
