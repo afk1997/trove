@@ -1,15 +1,28 @@
-# Trove
+# trove.
 
-**Save things you care about.**
+*a saving machine for the modern web.*
 
-A self-hosted, browser-based downloader for video and audio from YouTube, TikTok, Instagram, Vimeo, and ~1000 other sites — powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [ffmpeg](https://ffmpeg.org/).
+paste a link, get the file. no accounts, no upload limits, no telemetry. self-hosted on your machine, powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [ffmpeg](https://ffmpeg.org/) — works on YouTube, TikTok, Instagram, Vimeo, and ~1000 other sites.
 
-- One paste box, one click — videos save to your device.
-- Bulk paste, MP4/MP3 toggle, quality picker.
-- Mobile-friendly, dark mode included.
-- Single Python process, single Docker container, no Node.js.
+![trove hero](docs/screenshots/hero.png)
 
-## Quick start
+---
+
+## what's inside
+
+- one paste box, one click. videos and audio save to your device.
+- live progress bar with %, MB, fragment count, and ETA — even on YouTube's HLS streams.
+- bulk paste, MP4/MP3 toggle, quality picker.
+- mobile-friendly. light only — riso paper is the brand.
+- single Python process, single Docker container, no Node.
+
+| ![download in progress](docs/screenshots/download.png) | ![download complete](docs/screenshots/done.png) |
+|---|---|
+| **mid-download** | **saved** |
+
+---
+
+## quick start
 
 ```bash
 brew install yt-dlp ffmpeg     # macOS — or apt install ffmpeg && pip install yt-dlp
@@ -18,64 +31,69 @@ cd trove
 ./trove.sh
 ```
 
-Open **http://localhost:8899**.
+open **http://localhost:8899** and paste something.
 
-Or with Docker:
+or with Docker:
 
 ```bash
 docker build -t trove .
 docker run -p 8899:8899 -e HOST=0.0.0.0 trove
 ```
 
-*The `-e HOST=0.0.0.0` is required for Docker port-forwarding. For LAN/internet exposure, also set `TROVE_TOKEN` — see below.*
+*the `-e HOST=0.0.0.0` is required for Docker port-forwarding. for LAN/internet exposure, also set `TROVE_TOKEN` — see below.*
 
-## Configuration (env vars)
+<p align="center">
+  <img src="docs/screenshots/mobile.png" alt="trove on mobile" width="320">
+</p>
 
-| Variable | Default | What it does |
+## configuration (env vars)
+
+| variable | default | what it does |
 |---|---|---|
-| `HOST` | `127.0.0.1` | Bind address. Set to `0.0.0.0` only with a token. |
+| `HOST` | `127.0.0.1` | bind address. set to `0.0.0.0` only with a token. |
 | `PORT` | `8899` | TCP port. |
-| `TROVE_TOKEN` | *(unset)* | When set, every `/api/*` request must send `Authorization: Bearer <token>`. |
-| `TROVE_COOKIES_FROM_BROWSER` | *(unset)* | One of `safari\|chrome\|firefox\|brave\|edge`. Required for YouTube right now (Google blocks cookieless yt-dlp). |
-| `TROVE_JOB_TTL_SECONDS` | `3600` | How long completed jobs (and their files) linger before being swept. |
-| `TROVE_MAX_WORKERS` | `4` | Concurrent downloads. Excess returns HTTP 503. |
-| `TROVE_RATE_LIMIT` | `30` | Requests per minute per IP. Set to `0` to disable. |
+| `TROVE_TOKEN` | *(unset)* | when set, every `/api/*` request must send `Authorization: Bearer <token>`. |
+| `TROVE_COOKIES_FROM_BROWSER` | *(unset)* | one of `safari\|chrome\|firefox\|brave\|edge`. required for YouTube right now (Google blocks cookieless yt-dlp). |
+| `TROVE_JOB_TTL_SECONDS` | `3600` | how long completed jobs (and their files) linger before being swept. |
+| `TROVE_MAX_WORKERS` | `4` | concurrent downloads. excess returns HTTP 503. |
+| `TROVE_RATE_LIMIT` | `30` | requests per minute per IP. set to `0` to disable. |
 
-## Exposing to LAN or the internet
+## exposing to LAN or the internet
 
-The defaults assume **localhost only**. To expose Trove safely:
+the defaults assume **localhost only**. to expose trove safely:
 
-1. Set a token: `export TROVE_TOKEN=$(openssl rand -hex 32)`
-2. Set host: `export HOST=0.0.0.0`
-3. Run behind a reverse proxy that adds HTTPS (Caddy, nginx, fly.io, etc.).
+1. set a token: `export TROVE_TOKEN=$(openssl rand -hex 32)`
+2. set host: `export HOST=0.0.0.0`
+3. run behind a reverse proxy that adds HTTPS (Caddy, nginx, fly.io, etc.).
 
-Without `TROVE_TOKEN`, anyone who can reach the port can download.
+without `TROVE_TOKEN`, anyone who can reach the port can download.
 
 ## YouTube and cookies
 
-YouTube currently blocks `yt-dlp` connections that don't carry a real browser cookie. To download from YouTube, set:
+YouTube currently blocks `yt-dlp` connections that don't carry a real browser cookie. to download from YouTube, set:
 
 ```bash
 export TROVE_COOKIES_FROM_BROWSER=safari   # or chrome / firefox / brave / edge
 ./trove.sh
 ```
 
-The browser must be installed on the host and have an active YouTube session.
+the browser must be installed on the host and have an active YouTube session.
 
-## Stack
+## stack
 
-- **Backend:** Python 3.12 + Flask
-- **Frontend:** htmx 2 + Alpine.js 3 + Tailwind CSS (standalone CLI, no Node at runtime)
-- **Engine:** yt-dlp + ffmpeg
+- **backend:** Python 3.12 + Flask
+- **frontend:** htmx 2 + vanilla JS + Tailwind CSS (standalone CLI, no Node at runtime)
+- **engine:** yt-dlp + ffmpeg
+- **typography:** [Fraunces](https://fonts.google.com/specimen/Fraunces) (display, with the WONK + opsz variable axes), [Inter](https://fonts.google.com/specimen/Inter) (UI), [IBM Plex Mono](https://fonts.google.com/specimen/IBM+Plex+Mono) (stamps)
 
-## Disclaimer
+## disclaimer
 
-This tool is for personal use. Respect copyright laws and the terms of service of platforms you download from.
+this tool is for personal use. respect copyright laws and the terms of service of platforms you download from.
 
-## License
+## license
 
-MIT. See [LICENSE](LICENSE).
+MIT. see [LICENSE](LICENSE).
 
 ---
 
-Originally based on [averygan/reclip](https://github.com/averygan/reclip) (MIT). Substantially rewritten and rebranded as Trove in 2026.
+originally based on [averygan/reclip](https://github.com/averygan/reclip) (MIT). substantially rewritten and rebranded as trove in 2026.
