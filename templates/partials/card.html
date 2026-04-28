@@ -1,38 +1,46 @@
 {% set msgs = {
-  "unsupported_url": "This URL is not supported.",
-  "private_or_unavailable": "This video is private or unavailable.",
-  "geo_restricted": "Not available in your region.",
-  "rate_limited": "Hit a rate limit — try again in a minute.",
-  "auth_required": "The site needs login. Set TROVE_COOKIES_FROM_BROWSER and restart.",
-  "network": "Network problem — check your connection.",
-  "timeout": "Request timed out. Try again.",
-  "busy": "Server is busy. Try again in a moment.",
-  "unknown": "Something went wrong.",
+  "unsupported_url": "URL not supported",
+  "private_or_unavailable": "video private or unavailable",
+  "geo_restricted": "not available in your region",
+  "rate_limited": "rate limited — try again in a minute",
+  "auth_required": "site needs login (set TROVE_COOKIES_FROM_BROWSER)",
+  "network": "network problem — check connection",
+  "timeout": "request timed out",
+  "busy": "server busy — try again",
+  "unknown": "something went wrong",
 } %}
 
 {% if card.kind == "error" %}
-<div class="card border-error" style="border-color: var(--error)" data-status="error">
+<div class="card" data-status="error">
+  <div class="card-thumb">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12" y2="16.5"/>
+    </svg>
+  </div>
   <div class="flex-1 min-w-0">
-    <p class="text-sm font-medium" style="color: var(--error)">
-      {{ msgs.get(card.category, msgs["unknown"]) }}
-    </p>
+    <p class="card-title" style="color: var(--error)">ERROR</p>
+    <p class="card-status" data-color="red" style="margin-top: 2px">{{ msgs.get(card.category, msgs["unknown"]) }}</p>
     {% if card.url %}
-      <p class="text-xs mt-1 break-all" style="color: var(--muted)">{{ card.url }}</p>
+      <p class="card-meta" style="margin-top: 6px; word-break: break-all; text-transform: none; letter-spacing: 0">{{ card.url }}</p>
     {% endif %}
   </div>
 </div>
 
 {% elif card.kind == "ready" %}
 <div class="card" data-status="ready">
-  <div class="w-28 h-20 sm:w-32 sm:h-20 rounded-md overflow-hidden flex-shrink-0" style="background-color: var(--border)">
+  <div class="card-thumb">
     {% if card.thumbnail %}
-      <img src="{{ card.thumbnail }}" alt="" class="w-full h-full object-cover" loading="lazy">
+      <img src="{{ card.thumbnail }}" alt="" loading="lazy">
+    {% else %}
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="2" y="2" width="20" height="20" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="m21 15-5-5L5 21"/>
+      </svg>
     {% endif %}
   </div>
   <div class="flex-1 min-w-0">
-    <p class="text-sm font-medium truncate">{{ card.title or "Untitled" }}</p>
-    <p class="text-xs mt-1" style="color: var(--muted)">
-      {{ card.uploader or "" }}
+    <p class="card-title">{{ card.title or "Untitled" }}</p>
+    <p class="card-meta">
+      {{ card.uploader or "—" }}
       {% if card.duration %} · {{ "%d:%02d"|format(card.duration // 60, card.duration % 60) }}{% endif %}
     </p>
     <form
@@ -45,13 +53,13 @@
       <input type="hidden" name="title" value="{{ card.title or '' }}">
       <input type="hidden" name="format" value="{{ card.format or 'video' }}">
       {% if card.formats and (card.format or 'video') == 'video' %}
-        <select name="format_id" class="chip">
+        <select name="format_id" class="chip" style="padding: 0 8px; cursor: pointer">
           {% for f in card.formats %}
             <option value="{{ f.id }}">{{ f.label }}</option>
           {% endfor %}
         </select>
       {% endif %}
-      <button type="submit" class="btn-primary !min-h-[44px] !py-2 !px-4 text-sm">Save</button>
+      <button type="submit" class="btn-primary" style="min-height: 40px; font-size: 14px; padding: 0 16px">SAVE</button>
     </form>
   </div>
 </div>
@@ -65,44 +73,42 @@
   hx-trigger="every 1s"
   hx-swap="outerHTML"
 >
-  <div class="w-28 h-20 rounded-md flex-shrink-0 animate-pulse" style="background-color: var(--border)"></div>
+  <div class="card-thumb static-shimmer"></div>
   <div class="flex-1 min-w-0">
-    <p class="text-sm font-medium truncate">{{ card.title }}</p>
-    <p class="text-xs mt-1" style="color: var(--accent)">Saving…</p>
+    <p class="card-title">{{ card.title or "Untitled" }}</p>
+    <p class="card-status blink" data-color="amber" style="margin-top: 8px">SAVING</p>
   </div>
 </div>
 
 {% elif card.kind == "done" %}
 <div class="card" data-status="done">
-  <div class="w-28 h-20 rounded-md flex-shrink-0 flex items-center justify-center" style="background-color: var(--success); color: white">
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <div class="card-thumb" style="color: var(--success)">
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
       <polyline points="20 6 9 17 4 12"/>
     </svg>
   </div>
   <div class="flex-1 min-w-0">
-    <p class="text-sm font-medium truncate">{{ card.title }}</p>
-    <p class="text-xs mt-1" style="color: var(--muted)">{{ card.filename or "" }}</p>
+    <p class="card-title">{{ card.title or "Untitled" }}</p>
+    <p class="card-status" data-color="green" style="margin-top: 4px">SAVED</p>
     <a
       href="/api/file/{{ card.id }}"
       download="{{ card.filename or '' }}"
-      class="btn-primary !min-h-[40px] !py-2 !px-4 text-sm mt-3 inline-flex"
-    >Save to device</a>
+      class="btn-link mt-3 inline-flex"
+    >↓ download {{ card.filename or "file" }}</a>
   </div>
 </div>
 
 {% elif card.kind == "cancelled" %}
 <div class="card" data-status="cancelled">
   <div class="flex-1 min-w-0">
-    <p class="text-sm font-medium" style="color: var(--muted)">Cancelled.</p>
+    <p class="card-status">CANCELLED</p>
   </div>
 </div>
 
 {% else %}
-<div class="card border-error" style="border-color: var(--error)" data-status="error">
+<div class="card" data-status="error">
   <div class="flex-1 min-w-0">
-    <p class="text-sm font-medium" style="color: var(--error)">
-      {{ msgs.get(card.category, msgs["unknown"]) }}
-    </p>
+    <p class="card-status" data-color="red">{{ msgs.get(card.category, msgs["unknown"]) }}</p>
   </div>
 </div>
 {% endif %}

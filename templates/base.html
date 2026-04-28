@@ -2,68 +2,30 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>{% block title %}Trove — Save things you care about{% endblock %}</title>
   <meta name="description" content="Save things you care about. Self-hosted media downloader.">
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=VT323&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
-  <script nonce="{{ g.csp_nonce }}">
-    // Dark-mode bootstrap before paint
-    (function() {
-      var saved = localStorage.getItem('trove-theme');
-      var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      if (saved === 'dark' || (!saved && prefersDark)) {
-        document.documentElement.classList.add('dark');
-      }
-    })();
-  </script>
 </head>
-<body class="min-h-screen">
-  <div class="max-w-2xl mx-auto px-5 py-10 sm:py-16">
-    <header class="flex items-center justify-between mb-10">
-      <div>
-        <h1 class="text-3xl sm:text-4xl font-semibold tracking-tight">
-          Tr<span style="color: var(--accent)">o</span>ve
-        </h1>
-        <p class="text-sm" style="color: var(--muted)">Save things you care about</p>
-      </div>
-      <button
-        type="button"
-        x-data
-        @click="document.documentElement.classList.toggle('dark'); localStorage.setItem('trove-theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light')"
-        aria-label="Toggle dark mode"
-        class="btn-secondary !p-2 !rounded-full"
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="4"/>
-          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
-        </svg>
-      </button>
-    </header>
-
+<body>
+  <main>
     {% block content %}{% endblock %}
-
-    <footer class="mt-16 text-center text-xs" style="color: var(--muted)">
-      Originally based on
-      <a href="https://github.com/averygan/reclip" class="underline">averygan/reclip</a>
-      (MIT) · Rewritten as Trove
-    </footer>
-  </div>
+  </main>
 
   <script nonce="{{ g.csp_nonce }}" src="{{ url_for('static', filename='vendor/alpine.min.js') }}" defer></script>
   <script nonce="{{ g.csp_nonce }}" src="{{ url_for('static', filename='vendor/htmx.min.js') }}"></script>
   <script nonce="{{ g.csp_nonce }}">
-    // Cancel-on-tab-close: htmx isn't built for unload semantics, so we use sendBeacon.
     window.__troveActiveJobs = new Set();
     window.addEventListener('beforeunload', function() {
       for (var id of window.__troveActiveJobs) {
         try { navigator.sendBeacon('/api/job/' + id + '/cancel'); } catch (_) {}
       }
     });
-    document.addEventListener('htmx:afterSwap', function(evt) {
-      // Track active job IDs from data-job-id attributes still in the DOM.
+    document.addEventListener('htmx:afterSwap', function() {
       var active = new Set();
       document.querySelectorAll('[data-job-id][data-status="downloading"]').forEach(function(el) {
         active.add(el.dataset.jobId);
