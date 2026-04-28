@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Compact cassette body, viewer perspective: open edge down, label up, hubs flanking center. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200" width="320" height="200">
+  <defs>
+    <!-- Top sheen on the black plastic shell -->
+    <linearGradient id="shellSheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2522"/>
+      <stop offset="0.18" stop-color="#1a1715"/>
+      <stop offset="1" stop-color="#0c0a08"/>
+    </linearGradient>
+    <!-- Inner bevel near hub holes -->
+    <radialGradient id="hubWell" cx="0.5" cy="0.5" r="0.6">
+      <stop offset="0" stop-color="#000000"/>
+      <stop offset="0.7" stop-color="#0a0807"/>
+      <stop offset="1" stop-color="#1a1715"/>
+    </radialGradient>
+    <!-- Cream paper label, slightly off-white with subtle aging -->
+    <linearGradient id="paperLabel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0e4cc"/>
+      <stop offset="1" stop-color="#dccdb0"/>
+    </linearGradient>
+    <!-- Tape window: smoked plastic with the visible spool tape edge inside -->
+    <linearGradient id="tapeWindow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c1815"/>
+      <stop offset="0.4" stop-color="#0e0c0a"/>
+      <stop offset="0.6" stop-color="#241c14"/>
+      <stop offset="1" stop-color="#0a0807"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Outer shell -->
+  <rect x="2" y="2" width="316" height="196" rx="8" ry="8" fill="url(#shellSheen)" stroke="#000" stroke-width="0.8"/>
+
+  <!-- Inner faint bezel (gives the shell its molded depth) -->
+  <rect x="6" y="6" width="308" height="188" rx="6" ry="6" fill="none" stroke="#2c2724" stroke-width="0.6" opacity="0.9"/>
+
+  <!-- Top edge plastic sheen highlight -->
+  <rect x="8" y="7" width="304" height="2" rx="1" fill="#3a322d" opacity="0.55"/>
+  <rect x="8" y="9" width="304" height="1" rx="0.5" fill="#4a3f37" opacity="0.35"/>
+
+  <!-- Paper label rectangle (between hubs, upper-middle band) -->
+  <rect x="96" y="40" width="128" height="40" rx="2" ry="2"
+        fill="url(#paperLabel)" stroke="#a48f6c" stroke-width="0.4" opacity="0.92"/>
+  <!-- Two thin label rule lines (typical "side A / minutes" guides) -->
+  <line x1="100" y1="54" x2="220" y2="54" stroke="#a89271" stroke-width="0.3" opacity="0.55"/>
+  <line x1="100" y1="66" x2="220" y2="66" stroke="#a89271" stroke-width="0.3" opacity="0.55"/>
+
+  <!-- Hub wells (the recessed darkness around the hub holes) -->
+  <circle cx="74" cy="100" r="30" fill="url(#hubWell)"/>
+  <circle cx="230" cy="100" r="30" fill="url(#hubWell)"/>
+
+  <!-- Hub holes proper: empty circles (transparent) so reel.svg can be overlaid by layout -->
+  <circle cx="74" cy="100" r="22" fill="#000000"/>
+  <circle cx="230" cy="100" r="22" fill="#000000"/>
+  <!-- Faint inner ring inside the hub well, suggesting the molded socket -->
+  <circle cx="74" cy="100" r="22" fill="none" stroke="#2a2522" stroke-width="0.6" opacity="0.7"/>
+  <circle cx="230" cy="100" r="22" fill="none" stroke="#2a2522" stroke-width="0.6" opacity="0.7"/>
+
+  <!-- Tape window: lower-middle, shows the spool tape edge between the hubs -->
+  <rect x="118" y="138" width="84" height="22" rx="1.5" ry="1.5"
+        fill="url(#tapeWindow)" stroke="#000" stroke-width="0.5"/>
+  <!-- The strip of magnetic tape itself, visible through the window -->
+  <rect x="120" y="146" width="80" height="6" fill="#3b2a1c" opacity="0.85"/>
+  <rect x="120" y="146" width="80" height="1" fill="#5a3f26" opacity="0.6"/>
+
+  <!-- Pinch-roller / hub holes along the bottom edge: 5 small holes -->
+  <!-- These are the tape-path access holes on the open underside of the cassette -->
+  <circle cx="64"  cy="180" r="3" fill="#000" stroke="#2a2522" stroke-width="0.4"/>
+  <circle cx="112" cy="180" r="3" fill="#000" stroke="#2a2522" stroke-width="0.4"/>
+  <circle cx="160" cy="182" r="4" fill="#000" stroke="#2a2522" stroke-width="0.4"/> <!-- center capstan hole -->
+  <circle cx="208" cy="180" r="3" fill="#000" stroke="#2a2522" stroke-width="0.4"/>
+  <circle cx="256" cy="180" r="3" fill="#000" stroke="#2a2522" stroke-width="0.4"/>
+
+  <!-- Four screws at the corners (small dark circles + cross marks) -->
+  <g stroke="#0a0807" stroke-width="0.6">
+    <!-- top-left -->
+    <circle cx="20" cy="22" r="3.2" fill="#1d1916"/>
+    <line x1="20" y1="19.5" x2="20" y2="24.5" stroke="#0a0807" stroke-width="0.5"/>
+    <line x1="17.5" y1="22" x2="22.5" y2="22" stroke="#0a0807" stroke-width="0.5"/>
+    <!-- top-right -->
+    <circle cx="300" cy="22" r="3.2" fill="#1d1916"/>
+    <line x1="300" y1="19.5" x2="300" y2="24.5" stroke="#0a0807" stroke-width="0.5"/>
+    <line x1="297.5" y1="22" x2="302.5" y2="22" stroke="#0a0807" stroke-width="0.5"/>
+    <!-- bottom-left -->
+    <circle cx="20" cy="158" r="3.2" fill="#1d1916"/>
+    <line x1="20" y1="155.5" x2="20" y2="160.5" stroke="#0a0807" stroke-width="0.5"/>
+    <line x1="17.5" y1="158" x2="22.5" y2="158" stroke="#0a0807" stroke-width="0.5"/>
+    <!-- bottom-right -->
+    <circle cx="300" cy="158" r="3.2" fill="#1d1916"/>
+    <line x1="300" y1="155.5" x2="300" y2="160.5" stroke="#0a0807" stroke-width="0.5"/>
+    <line x1="297.5" y1="158" x2="302.5" y2="158" stroke="#0a0807" stroke-width="0.5"/>
+  </g>
+
+  <!-- Subtle highlight along the very top edge (specular plastic sheen) -->
+  <rect x="12" y="3.5" width="296" height="1" rx="0.5" fill="#5a4d44" opacity="0.4"/>
+</svg>

@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Analog VU meter face. Cream background, arc tick marks, red zone at upper end, pivoting needle. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 80" width="200" height="80">
+  <defs>
+    <!-- Aged paper background -->
+    <linearGradient id="meterPaper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0e4cc"/>
+      <stop offset="0.6" stop-color="#e8dcc4"/>
+      <stop offset="1" stop-color="#d4c2a0"/>
+    </linearGradient>
+    <radialGradient id="paperGlow" cx="0.5" cy="1" r="0.8">
+      <stop offset="0" stop-color="#fff7e6" stop-opacity="0.55"/>
+      <stop offset="0.6" stop-color="#fff7e6" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Light beveled bezel -->
+    <linearGradient id="meterBezel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a3530"/>
+      <stop offset="1" stop-color="#0a0807"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Outer bezel -->
+  <rect x="1" y="1" width="198" height="78" rx="3" fill="url(#meterBezel)" stroke="#000" stroke-width="0.5"/>
+  <!-- Inset paper face -->
+  <rect x="4" y="4" width="192" height="72" rx="2" fill="url(#meterPaper)" stroke="#a48f6c" stroke-width="0.3"/>
+  <!-- Subtle warm glow rising from the bottom -->
+  <rect x="4" y="4" width="192" height="72" rx="2" fill="url(#paperGlow)" opacity="0.6"/>
+
+  <!--
+    Tick marks arranged on an arc. Pivot is at the bottom-center: (100, 92).
+    Arc radius for major ticks ~ 62; minor ticks slightly shorter.
+    The arc spans roughly -55 to +55 degrees from vertical.
+    Each tick is drawn from a point on the arc outward, then rotated about (100, 92).
+    Numeric labels: -20 (left), -10, -5, 0, +3 (right).
+  -->
+  <g stroke="#1a1715" fill="none">
+    <!-- Minor ticks (every ~6 degrees), drawn as small radial lines -->
+    <g stroke-width="0.5" opacity="0.85">
+      <line x1="100" y1="32" x2="100" y2="36" transform="rotate(-50 100 92)"/>
+      <line x1="100" y1="32" x2="100" y2="36" transform="rotate(-44 100 92)"/>
+      <line x1="100" y1="32" x2="100" y2="36" transform="rotate(-38 100 92)"/>
+      <line x1="100" y1="32" x2="100" y2="36" transform="rotate(-32 100 92)"/>
+      <line x1="100" y1="32" x2="100" y2="36" transform="rotate(-26 100 92)"/>
+      <line x1="100" y1="32" x2="100" y2="36" transform="rotate(-20 100 92)"/>
+      <line x1="100" y1="32" x2="100" y2="36" transform="rotate(-14 100 92)"/>
+      <line x1="100" y1="32" x2="100" y2="36" transform="rotate(-8 100 92)"/>
+      <line x1="100" y1="32" x2="100" y2="36" transform="rotate(-4 100 92)"/>
+      <!-- 0 (zero VU): drawn as a major below -->
+      <line x1="100" y1="32" x2="100" y2="36" transform="rotate(4 100 92)"/>
+      <line x1="100" y1="32" x2="100" y2="36" transform="rotate(8 100 92)"/>
+      <line x1="100" y1="32" x2="100" y2="36" transform="rotate(12 100 92)"/>
+    </g>
+    <!-- Major ticks (longer, thicker) at -20, -10, -5, 0, +3 -->
+    <g stroke-width="1" stroke="#0a0807">
+      <line x1="100" y1="28" x2="100" y2="36" transform="rotate(-50 100 92)"/> <!-- -20 -->
+      <line x1="100" y1="28" x2="100" y2="36" transform="rotate(-26 100 92)"/> <!-- -10 -->
+      <line x1="100" y1="28" x2="100" y2="36" transform="rotate(-14 100 92)"/> <!-- -5 -->
+      <line x1="100" y1="28" x2="100" y2="36" transform="rotate(0 100 92)"/>   <!-- 0  -->
+    </g>
+    <!-- Major ticks in the red zone -->
+    <g stroke-width="1" stroke="#9a1010">
+      <line x1="100" y1="28" x2="100" y2="36" transform="rotate(8 100 92)"/>   <!-- +1 -->
+      <line x1="100" y1="28" x2="100" y2="36" transform="rotate(20 100 92)"/>  <!-- +3 -->
+    </g>
+  </g>
+
+  <!-- Red zone arc segment (0 to +3, on the upper-right of the scale) -->
+  <!-- Drawn as a thick stroked arc above the tick row.
+       The arc center is the pivot (100, 92). Outer radius ~ 26; arc spans 0 to +20 degrees.
+       Endpoints in coordinates around the pivot:
+         start: rotate(0)  of (100, 92-26) = (100, 66)
+         end:   rotate(20) of (100, 66) = (100 + sin20*26, 92 - cos20*26) = (108.89, 67.57)
+  -->
+  <path d="M 100 66 A 26 26 0 0 1 108.89 67.57"
+        stroke="#c41e1e" stroke-width="2.5" fill="none" stroke-linecap="butt" opacity="0.9"/>
+
+  <!-- Numeric labels along the scale -->
+  <g font-family="Helvetica, Arial, sans-serif" font-size="5" fill="#1a1715" text-anchor="middle">
+    <!-- Position labels manually per their major-tick angle.
+         For each, x = 100 + sin(angle) * 24, y = 92 - cos(angle) * 24, then bumped up a bit. -->
+    <text x="81.6" y="76.6">-20</text>     <!-- angle -50: 100+sin(-50)*24 ~ 81.6, 92-cos(-50)*24 ~ 76.6 -->
+    <text x="89.5" y="70.4">-10</text>     <!-- -26 -->
+    <text x="94.2" y="68.7">-5</text>      <!-- -14 -->
+    <text x="100"  y="68.5">0</text>       <!-- 0 -->
+    <text x="108.2" y="69.4" fill="#9a1010">+3</text>   <!-- +20 -->
+  </g>
+
+  <!-- VU label centered, italic small caps style -->
+  <text x="100" y="58" text-anchor="middle"
+        font-family="Georgia, 'Times New Roman', serif" font-style="italic" font-size="6.5"
+        fill="#3d2818" opacity="0.85">VU</text>
+
+  <!-- Pivot point (bottom-center) -->
+  <circle cx="100" cy="92" r="3.5" fill="#1a1715" stroke="#3a3530" stroke-width="0.4"/>
+  <circle cx="100" cy="92" r="1.4" fill="#5a5752"/>
+
+  <!--
+    Needle group. transform-origin pinned at the pivot (100, 92) so JS can rotate via
+    style="transform: rotate(<deg>)". Default rest position rotates -45 deg (toward -20).
+  -->
+  <g id="needle" transform-origin="100 92" transform="rotate(-45 100 92)">
+    <line id="needle-line" x1="100" y1="92" x2="100" y2="34"
+          stroke="#1a1715" stroke-width="1.5" stroke-linecap="round"/>
+    <!-- Tiny counterweight tail below the pivot -->
+    <line x1="100" y1="92" x2="100" y2="98"
+          stroke="#1a1715" stroke-width="2" stroke-linecap="round" opacity="0.85"/>
+    <!-- Needle hub cap -->
+    <circle cx="100" cy="92" r="1.6" fill="#0a0807"/>
+  </g>
+</svg>

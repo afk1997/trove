@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Vinyl record, top-down. Concentric grooves drawn as dense thin rings; cream center label. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" width="320" height="320">
+  <defs>
+    <!-- Subtle vignette / sheen from upper-left light source -->
+    <radialGradient id="vinylSheen" cx="0.3" cy="0.25" r="0.9">
+      <stop offset="0" stop-color="#1c1c1c"/>
+      <stop offset="0.35" stop-color="#0e0e0e"/>
+      <stop offset="0.75" stop-color="#080808"/>
+      <stop offset="1" stop-color="#040404"/>
+    </radialGradient>
+    <radialGradient id="paperLabelV" cx="0.45" cy="0.4" r="0.6">
+      <stop offset="0" stop-color="#f0e4cc"/>
+      <stop offset="1" stop-color="#cab896"/>
+    </radialGradient>
+    <!-- A single specular highlight on the upper-left of the disc -->
+    <radialGradient id="topGloss" cx="0.28" cy="0.2" r="0.45">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Outer disc -->
+  <circle cx="160" cy="160" r="156" fill="url(#vinylSheen)"/>
+
+  <!-- Concentric grooves: many thin circles. Mix of darker rings and faint highlights. -->
+  <g fill="none">
+    <!-- Outer band of dense fine grooves: r 60..152 step 2 -->
+    <circle cx="160" cy="160" r="152" stroke="#1a1a1a" stroke-width="0.5" opacity="0.6"/>
+    <circle cx="160" cy="160" r="150" stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <circle cx="160" cy="160" r="148" stroke="#1a1a1a" stroke-width="0.5" opacity="0.55"/>
+    <circle cx="160" cy="160" r="146" stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <circle cx="160" cy="160" r="144" stroke="#1a1a1a" stroke-width="0.5" opacity="0.55"/>
+    <circle cx="160" cy="160" r="142" stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <circle cx="160" cy="160" r="140" stroke="#1a1a1a" stroke-width="0.5" opacity="0.55"/>
+    <circle cx="160" cy="160" r="138" stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <circle cx="160" cy="160" r="136" stroke="#1c1c1c" stroke-width="0.5" opacity="0.6"/>
+    <!-- Slightly brighter ring marking the start of a "track" - common on real records -->
+    <circle cx="160" cy="160" r="134" stroke="#2a2a2a" stroke-width="0.7" opacity="0.7"/>
+    <circle cx="160" cy="160" r="132" stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <circle cx="160" cy="160" r="130" stroke="#1a1a1a" stroke-width="0.5" opacity="0.55"/>
+    <circle cx="160" cy="160" r="128" stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <circle cx="160" cy="160" r="126" stroke="#1a1a1a" stroke-width="0.5" opacity="0.55"/>
+    <circle cx="160" cy="160" r="124" stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <circle cx="160" cy="160" r="122" stroke="#1a1a1a" stroke-width="0.5" opacity="0.55"/>
+    <circle cx="160" cy="160" r="120" stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <circle cx="160" cy="160" r="118" stroke="#1a1a1a" stroke-width="0.5" opacity="0.55"/>
+    <circle cx="160" cy="160" r="116" stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <!-- Track separator -->
+    <circle cx="160" cy="160" r="114" stroke="#2a2a2a" stroke-width="0.7" opacity="0.7"/>
+    <circle cx="160" cy="160" r="112" stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <circle cx="160" cy="160" r="110" stroke="#1a1a1a" stroke-width="0.5" opacity="0.55"/>
+    <circle cx="160" cy="160" r="108" stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <circle cx="160" cy="160" r="106" stroke="#1a1a1a" stroke-width="0.5" opacity="0.55"/>
+    <circle cx="160" cy="160" r="104" stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <circle cx="160" cy="160" r="102" stroke="#1a1a1a" stroke-width="0.5" opacity="0.55"/>
+    <circle cx="160" cy="160" r="100" stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <circle cx="160" cy="160" r="98"  stroke="#1a1a1a" stroke-width="0.5" opacity="0.55"/>
+    <circle cx="160" cy="160" r="96"  stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <!-- Track separator -->
+    <circle cx="160" cy="160" r="94"  stroke="#2a2a2a" stroke-width="0.7" opacity="0.7"/>
+    <circle cx="160" cy="160" r="92"  stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <circle cx="160" cy="160" r="90"  stroke="#1a1a1a" stroke-width="0.5" opacity="0.55"/>
+    <circle cx="160" cy="160" r="88"  stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <circle cx="160" cy="160" r="86"  stroke="#1a1a1a" stroke-width="0.5" opacity="0.55"/>
+    <circle cx="160" cy="160" r="84"  stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <circle cx="160" cy="160" r="82"  stroke="#1a1a1a" stroke-width="0.5" opacity="0.55"/>
+    <circle cx="160" cy="160" r="80"  stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <circle cx="160" cy="160" r="78"  stroke="#1a1a1a" stroke-width="0.5" opacity="0.55"/>
+    <circle cx="160" cy="160" r="76"  stroke="#000" stroke-width="0.6" opacity="0.5"/>
+    <!-- Inner "lead-out" groove: a slightly brighter ring just outside the label -->
+    <circle cx="160" cy="160" r="73"  stroke="#2c2c2c" stroke-width="0.8" opacity="0.7"/>
+    <circle cx="160" cy="160" r="71"  stroke="#000" stroke-width="0.5" opacity="0.5"/>
+  </g>
+
+  <!-- Specular gloss (upper-left light source) -->
+  <circle cx="160" cy="160" r="156" fill="url(#topGloss)"/>
+
+  <!-- Center paper label (~30% diameter = r 48) -->
+  <circle cx="160" cy="160" r="48" fill="url(#paperLabelV)" stroke="#a48f6c" stroke-width="0.4"/>
+  <!-- Inner label ring (typical "trim" near center hole) -->
+  <circle cx="160" cy="160" r="44" fill="none" stroke="#a48f6c" stroke-width="0.3" opacity="0.5"/>
+  <!-- Brand text -->
+  <text x="160" y="148" text-anchor="middle"
+        font-family="Georgia, 'Times New Roman', serif" font-size="9" font-weight="700"
+        letter-spacing="2.5" fill="#3d2818" opacity="0.85">TROVE</text>
+  <text x="160" y="180" text-anchor="middle"
+        font-family="Georgia, 'Times New Roman', serif" font-size="4.5"
+        letter-spacing="1.2" fill="#5a3f26" opacity="0.7">SIDE A &#183; 33&#8531; RPM</text>
+
+  <!-- Tiny center hole -->
+  <circle cx="160" cy="160" r="2.4" fill="#040404" stroke="#1a1715" stroke-width="0.3"/>
+</svg>
