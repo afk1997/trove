@@ -70,7 +70,7 @@ without `TROVE_TOKEN`, anyone who can reach the port can download.
 
 ## YouTube and cookies
 
-YouTube currently blocks `yt-dlp` connections that don't carry a real browser cookie. to download from YouTube, set:
+cookies are **recommended** for YouTube. short, public, non-monetized videos often work without them, but YouTube will eventually serve a sign-in wall for age-restricted content, certain regions, or longer/monetized uploads. to use cookies from your browser:
 
 ```bash
 export TROVE_COOKIES_FROM_BROWSER=safari   # or chrome / firefox / brave / edge
@@ -96,4 +96,4 @@ MIT. see [LICENSE](LICENSE).
 
 ---
 
-originally based on [averygan/reclip](https://github.com/averygan/reclip) (MIT). substantially rewritten and rebranded as trove in 2026.
+originally inspired by [averygan/reclip](https://github.com/averygan/reclip) (MIT). trove has since diverged into its own project — different brand, different UI, different feature set.
