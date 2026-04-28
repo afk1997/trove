@@ -111,3 +111,42 @@ def test_rate_limiter_window_resets(monkeypatch):
     assert rl.allow("x") is False
     now[0] = 11.0
     assert rl.allow("x") is True
+
+
+from safety import attach_security_headers
+
+
+def test_attach_security_headers_sets_basic_headers():
+    app = Flask(__name__)
+    attach_security_headers(app)
+
+    @app.get("/")
+    def hello():
+        return "hi"
+
+    r = app.test_client().get("/")
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+    assert r.headers["X-Frame-Options"] == "DENY"
+    assert r.headers["Referrer-Policy"] == "no-referrer"
+    csp = r.headers["Content-Security-Policy"]
+    assert "default-src 'self'" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
+
+
+def test_attach_security_headers_includes_per_request_nonce():
+    app = Flask(__name__)
+    attach_security_headers(app)
+
+    @app.get("/")
+    def hello():
+        from flask import g
+        return g.csp_nonce
+
+    client = app.test_client()
+    r1 = client.get("/")
+    r2 = client.get("/")
+    nonce1 = r1.get_data(as_text=True)
+    nonce2 = r2.get_data(as_text=True)
+    assert nonce1 and nonce2 and nonce1 != nonce2
+    assert f"'nonce-{nonce1}'" in r1.headers["Content-Security-Policy"]

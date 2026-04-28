@@ -4,10 +4,11 @@ import socket
 from urllib.parse import urlparse
 import os
 from functools import wraps
-from flask import request, jsonify
+from flask import request, jsonify, g
 import time
 from collections import deque
 from threading import Lock
+import secrets
 
 
 _ALLOWED_SCHEMES = {"http", "https"}
@@ -115,3 +116,30 @@ class RateLimiter:
                 return False
             q.append(now)
             return True
+
+
+def attach_security_headers(app):
+    """Mount per-request CSP nonce + standard security headers on a Flask app."""
+
+    @app.before_request
+    def _set_nonce():
+        g.csp_nonce = secrets.token_urlsafe(16)
+
+    @app.after_request
+    def _set_headers(response):
+        nonce = getattr(g, "csp_nonce", "")
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            f"img-src 'self' https: data:; "
+            f"style-src 'self' 'nonce-{nonce}' https://fonts.googleapis.com; "
+            f"font-src 'self' https://fonts.gstatic.com; "
+            f"script-src 'self' 'nonce-{nonce}'; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none'"
+        )
+        return response
+
+    return app
