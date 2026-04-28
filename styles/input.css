@@ -638,4 +638,105 @@
    MOTION — placeholder; task 6 fills these in
    ============================================================ */
 
-/* (keyframes + reduced-motion + mobile added in Task 6) */
+/* ============================================================
+   MOTION KEYFRAMES
+   ============================================================ */
+
+@keyframes card-in {
+  0%   { opacity: 0; transform: translateY(-6px) rotate(-0.6deg); }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0) rotate(0deg); }
+}
+
+@keyframes scan {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+@keyframes stamp-slam {
+  0%   { opacity: 0; transform: rotate(8deg) scale(2.2); }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: rotate(2.5deg) scale(1); }
+}
+
+@keyframes ink-burst {
+  0%   { opacity: 0; transform: scale(0.5); }
+  20%  { opacity: 0.6; }
+  100% { opacity: 0; transform: scale(2.2); }
+}
+
+@keyframes blink { to { opacity: 0; } }
+
+@keyframes breathe-up {
+  0%, 100% { transform: translateY(0); opacity: 0.55; }
+  50%      { transform: translateY(-3px); opacity: 0.85; }
+}
+
+/* ============================================================
+   REDUCED MOTION
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .clip { animation: none; }
+  .clip-progress::after { display: none; }
+  .clip-saved-stamp { animation: none; }
+  .clip-saved-stamp::before { display: none; }
+  .clip-saving-stamp .ellipsis { animation: none; opacity: 1; }
+  .empty-hint .arrow-up { animation: none; opacity: 0.55; }
+  .hero-cta.is-fetching .ellipsis { animation: none; opacity: 1; }
+}
+
+/* ============================================================
+   MOBILE — viewport <= 480px
+   ============================================================ */
+
+@media (max-width: 480px) {
+  .hero-stage { padding: 20px 16px 28px; }
+  .hero-mark { font-size: clamp(48px, 14vw, 72px); }
+  .hero-arrow { font-size: 36px; margin-left: 10px; margin-bottom: 8px; }
+  .hero-tag { font-size: 17px; margin: 12px 0 24px; }
+  .hero-controls {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .hero-cta {
+    margin-left: 0;
+    width: 100%;
+    padding: 12px 18px;
+    min-height: 44px;
+  }
+  .hero-pill { padding: 10px 18px; min-height: 44px; }
+  .hero-corner-stamp { top: 12px; right: 12px; font-size: 8px; padding: 3px 6px; }
+  .hero-ticker { font-size: 9px; flex-direction: column; gap: 6px; align-items: flex-start; }
+  .hero-ticker .right { align-self: flex-end; }
+
+  /* Cards stack vertically */
+  .clip { grid-template-columns: 1fr; }
+  .clip-thumb {
+    width: 100%; height: 96px;
+    border-right: none;
+    border-bottom: 1.5px solid var(--teal);
+  }
+  .clip.is-downloading .clip-thumb {
+    border-bottom-color: var(--orange);
+    border-right-color: transparent;
+  }
+  .clip.is-error .clip-thumb {
+    border-right-color: transparent;
+    border-bottom-color: var(--orange);
+  }
+  .clip-action {
+    border-left: none;
+    border-top: 1px dashed rgba(26, 53, 64, 0.25);
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+  }
+  .clip-picker { flex: 1; }
+}
