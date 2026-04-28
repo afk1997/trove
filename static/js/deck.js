@@ -40,6 +40,8 @@
         this._wireUnloadCancel();
       },
 
+      _gsap() { return window.gsap || null; },
+
       _wireHtmxListeners() {
         const target = document.getElementById('card-target');
         if (!target) return;
@@ -105,8 +107,15 @@
       },
 
       setMode(mode) {
-        if (mode !== 'tape' && mode !== 'vinyl') return;
-        this.mode = mode;
+        if (mode !== 'tape' && mode !== 'vinyl' || mode === this.mode) return;
+        const tl = this._gsap()?.timeline();
+        if (tl && !this.reducedMotion) {
+          tl.to('.deck-window', { rotateX: 90, duration: 0.4, ease: 'power2.in' })
+            .add(() => { this.mode = mode; })
+            .to('.deck-window', { rotateX: 0, duration: 0.4, ease: 'power2.out' });
+        } else {
+          this.mode = mode;
+        }
         writePersisted({ mode });
       },
 
@@ -115,13 +124,49 @@
         writePersisted({ soundOn: this.soundOn });
       },
 
-      // Action methods (filled in by D2/D3)
-      rec() { this._submitDownload(); },
+      // Action methods
+      rec() {
+        if (this.status !== 'load') return;
+        const tl = this._gsap()?.timeline();
+        if (tl) {
+          tl.to('.deck-btn--rec', { y: 2, duration: 0.05 })
+            .to('.cassette', { scale: 1.0, duration: 0.1 })
+            .add(() => this._submitDownload());
+        } else {
+          this._submitDownload();
+        }
+        this._startCounter();
+      },
+
+      _startCounter() {
+        this.counter = '0:00';
+        this._tickerStart = Date.now();
+        if (this._tickerHandle) clearInterval(this._tickerHandle);
+        this._tickerHandle = setInterval(() => {
+          if (this.status !== 'rec') {
+            clearInterval(this._tickerHandle);
+            this._tickerHandle = null;
+            return;
+          }
+          const sec = Math.floor((Date.now() - this._tickerStart) / 1000);
+          const m = Math.floor(sec / 60);
+          const s = sec % 60;
+          this.counter = `${m}:${s.toString().padStart(2, '0')}`;
+        }, 250);
+      },
+
       stop() { /* future: cancel + reset */ },
+
       eject() {
+        const tl = this._gsap()?.timeline();
+        if (tl) {
+          tl.to('.cassette', { y: -8, duration: 0.4, ease: 'power2.out' })
+            .to('.cassette', { y: 0, duration: 0.6, ease: 'power2.in', delay: 0.2 });
+        }
         this.status = 'ready';
         this.videoTitle = '';
         this.jobId = null;
+        if (this._tickerHandle) { clearInterval(this._tickerHandle); this._tickerHandle = null; }
       },
 
       _submitDownload() {
