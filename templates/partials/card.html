@@ -1,0 +1,7 @@
+{% if card.kind == "error" %}
+  <div class="card-error" data-category="{{ card.category }}">URL not supported: {{ card.url }}</div>
+{% else %}
+  <div class="card" data-status="{{ card.kind }}" data-job-id="{{ card.id or '' }}">
+    {{ card.title or 'Untitled' }}
+  </div>
+{% endif %}
