@@ -154,12 +154,13 @@ def create_app() -> Flask:
         format_choice = request.form.get("format", "video")
         format_id = request.form.get("format_id") or None
         title = (request.form.get("title") or "").strip()
+        thumbnail = (request.form.get("thumbnail") or "").strip()
         if not is_safe_url(url):
             return render_template("partials/card.html", card={
                 "kind": "error", "url": url, "category": "unsupported_url",
             }), 400
         try:
-            job_id = _enqueue_download(url, format_choice, format_id, title)
+            job_id = _enqueue_download(url, format_choice, format_id, title, thumbnail)
         except RuntimeError:
             return render_template("partials/card.html", card={
                 "kind": "error", "url": url, "category": "busy",
@@ -173,6 +174,9 @@ def create_app() -> Flask:
         job = job_manager.get(job_id)
         if job is None:
             return "", 404
+        # Skip swap while still in progress so animations + thumbnail stay smooth.
+        if job.status in (JobStatus.QUEUED, JobStatus.DOWNLOADING):
+            return "", 204
         return render_template("partials/card.html", card=_card_view(job))
 
     @app.post("/api/job/<job_id>/cancel")
@@ -188,8 +192,9 @@ def create_app() -> Flask:
 
     # --- helpers -----------------------------------------------------------
 
-    def _enqueue_download(url: str, format_choice: str, format_id, title: str) -> str:
+    def _enqueue_download(url: str, format_choice: str, format_id, title: str, thumbnail: str = "") -> str:
         def _work(job: Job):
+            job.thumbnail = thumbnail
             out_template = str(DOWNLOAD_DIR / f"{job.id}.%(ext)s")
             result = run_download(
                 url=url,
@@ -214,6 +219,7 @@ def create_app() -> Flask:
             "id": job.id,
             "title": job.title or "Untitled",
             "url": job.url,
+            "thumbnail": job.thumbnail or "",
             "filename": job.filename,
             "category": job.error_category,
         }

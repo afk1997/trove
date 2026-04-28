@@ -1,55 +1,80 @@
 {% extends "base.html" %}
 
 {% block content %}
-<form
-  id="fetch-form"
-  hx-post="/api/info-card"
-  hx-target="#queue"
-  hx-swap="beforeend"
-  hx-on::before-request="this.querySelector('[name=fetch-btn]').disabled = true"
-  hx-on::after-request="this.querySelector('[name=fetch-btn]').disabled = false; this.reset()"
-  class="space-y-4"
->
-  <div>
-    <label for="urls" class="sr-only">Paste a link</label>
-    <textarea
+<div class="mx-auto max-w-2xl px-5 pt-16 pb-24 sm:pt-24">
+  <header class="text-center mb-14 sm:mb-16">
+    <h1 class="wordmark">TROVE</h1>
+    <p class="tagline mt-3">Save things you care about</p>
+  </header>
+
+  <form
+    id="fetch-form"
+    hx-post="/api/info-card"
+    hx-target="#queue"
+    hx-swap="afterbegin"
+    class="space-y-3"
+  >
+    <label class="sr-only" for="urls">Paste a link</label>
+    <input
       id="urls"
       name="url"
-      rows="2"
-      placeholder="Paste a link to get started…"
-      class="w-full px-5 py-4 text-base bg-surface border rounded shadow-card focus:outline-none focus:border-accent"
-      style="background-color: var(--surface); border-color: var(--border)"
-    ></textarea>
-    <p class="text-xs mt-2" style="color: var(--muted)">
-      YouTube · TikTok · Instagram · Vimeo · 1000+ more
-    </p>
-  </div>
+      type="url"
+      placeholder="paste a link"
+      autocomplete="off"
+      autocapitalize="off"
+      spellcheck="false"
+      required
+      class="panel-input"
+    >
 
-  <div class="flex gap-3 items-center" x-data="{ format: 'video' }">
-    <div class="inline-flex p-1 rounded-lg" style="background-color: var(--surface); border: 1px solid var(--border)">
-      <button
-        type="button"
-        @click="format = 'video'"
-        :class="format === 'video' ? 'bg-fg text-bg' : ''"
-        :style="format === 'video' ? 'background-color: var(--fg); color: var(--bg)' : ''"
-        class="px-4 py-2 rounded-md text-sm font-medium transition"
-      >MP4</button>
-      <button
-        type="button"
-        @click="format = 'audio'"
-        :class="format === 'audio' ? 'bg-fg text-bg' : ''"
-        :style="format === 'audio' ? 'background-color: var(--fg); color: var(--bg)' : ''"
-        class="px-4 py-2 rounded-md text-sm font-medium transition"
-      >MP3</button>
+    <input type="hidden" name="format" id="format-input" value="video">
+    <div class="flex gap-2 items-center">
+      <div class="format-toggle" role="group" aria-label="Format">
+        <button type="button" class="chip is-active" data-format="video">MP4</button>
+        <button type="button" class="chip" data-format="audio">MP3</button>
+      </div>
+      <span class="flex-1"></span>
+      <button type="submit" class="btn-primary" id="fetch-btn">FETCH</button>
     </div>
-    <input type="hidden" name="format" :value="format">
-    <button
-      name="fetch-btn"
-      type="submit"
-      class="btn-primary flex-1 min-h-[44px]"
-    >Fetch</button>
-  </div>
-</form>
+  </form>
 
-<div id="queue" aria-live="polite" class="space-y-3 mt-8"></div>
+  <p class="tagline text-center mt-4 opacity-60" style="font-size: 12px; letter-spacing: 0.16em">
+    youtube · tiktok · instagram · vimeo · 1000+ more
+  </p>
+
+  <div id="queue" aria-live="polite" class="mt-10 space-y-3"></div>
+</div>
+
+<script nonce="{{ g.csp_nonce }}">
+  // Format toggle (vanilla — strict CSP blocks Alpine's eval-based directives)
+  document.querySelectorAll('.format-toggle .chip').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.format-toggle .chip').forEach(function (c) {
+        c.classList.remove('is-active');
+      });
+      btn.classList.add('is-active');
+      document.getElementById('format-input').value = btn.dataset.format;
+    });
+  });
+
+  // FETCH button label state, reset form, persist format selection across resets
+  (function () {
+    var form = document.getElementById('fetch-form');
+    var btn = document.getElementById('fetch-btn');
+    form.addEventListener('htmx:beforeRequest', function () {
+      btn.disabled = true;
+      btn.textContent = 'FETCHING…';
+    });
+    form.addEventListener('htmx:afterRequest', function () {
+      btn.disabled = false;
+      btn.textContent = 'FETCH';
+      var keepFormat = document.getElementById('format-input').value;
+      form.reset();
+      document.getElementById('format-input').value = keepFormat;
+      document.querySelectorAll('.format-toggle .chip').forEach(function (c) {
+        c.classList.toggle('is-active', c.dataset.format === keepFormat);
+      });
+    });
+  })();
+</script>
 {% endblock %}
