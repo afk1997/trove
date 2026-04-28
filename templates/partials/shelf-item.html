@@ -1,0 +1,7 @@
+{# Reserved for server-side rendering of shelf items — currently the shelf is #}
+{# rendered client-side from Alpine state. Kept as a placeholder for future #}
+{# history-page work. #}
+<a class="shelf-item" href="/api/file/{{ card.id }}" download="{{ card.filename or '' }}">
+  <span class="shelf-thumb {% if card.format == 'audio' %}is-vinyl{% else %}is-cassette{% endif %}"></span>
+  <span class="shelf-label">{{ card.title }}</span>
+</a>

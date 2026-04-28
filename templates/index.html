@@ -1,55 +1,116 @@
 {% extends "base.html" %}
 
 {% block content %}
-<form
-  id="fetch-form"
-  hx-post="/api/info-card"
-  hx-target="#queue"
-  hx-swap="beforeend"
-  hx-on::before-request="this.querySelector('[name=fetch-btn]').disabled = true"
-  hx-on::after-request="this.querySelector('[name=fetch-btn]').disabled = false; this.reset()"
-  class="space-y-4"
+<div
+  id="deck"
+  x-data="trove.deck()"
+  x-init="init()"
+  data-mode="tape"
+  data-status="ready"
+  class="deck"
 >
-  <div>
-    <label for="urls" class="sr-only">Paste a link</label>
-    <textarea
-      id="urls"
-      name="url"
-      rows="2"
-      placeholder="Paste a link to get started…"
-      class="w-full px-5 py-4 text-base bg-surface border rounded shadow-card focus:outline-none focus:border-accent"
-      style="background-color: var(--surface); border-color: var(--border)"
-    ></textarea>
-    <p class="text-xs mt-2" style="color: var(--muted)">
-      YouTube · TikTok · Instagram · Vimeo · 1000+ more
-    </p>
-  </div>
+  <button
+    type="button"
+    class="deck-sound-toggle"
+    @click="toggleSound()"
+    :aria-label="soundOn ? 'Mute sound' : 'Enable sound'"
+    aria-live="polite"
+  >
+    <span x-show="!soundOn" aria-hidden="true">🔇</span>
+    <span x-show="soundOn" aria-hidden="true">🔊</span>
+  </button>
 
-  <div class="flex gap-3 items-center" x-data="{ format: 'video' }">
-    <div class="inline-flex p-1 rounded-lg" style="background-color: var(--surface); border: 1px solid var(--border)">
-      <button
-        type="button"
-        @click="format = 'video'"
-        :class="format === 'video' ? 'bg-fg text-bg' : ''"
-        :style="format === 'video' ? 'background-color: var(--fg); color: var(--bg)' : ''"
-        class="px-4 py-2 rounded-md text-sm font-medium transition"
-      >MP4</button>
-      <button
-        type="button"
-        @click="format = 'audio'"
-        :class="format === 'audio' ? 'bg-fg text-bg' : ''"
-        :style="format === 'audio' ? 'background-color: var(--fg); color: var(--bg)' : ''"
-        class="px-4 py-2 rounded-md text-sm font-medium transition"
-      >MP3</button>
+  <div class="deck-wordmark" aria-label="Trove">TROVE</div>
+
+  <div class="deck-window" :class="{ 'is-loading': status === 'load', 'is-recording': status === 'rec', 'is-done': status === 'done' }">
+    <div class="cassette" x-show="mode === 'tape'" x-cloak>
+      <img src="{{ url_for('static', filename='img/cassette-shell.svg') }}" alt="" class="cassette-shell">
+      <div class="reel reel-left" data-reel><img src="{{ url_for('static', filename='img/reel.svg') }}" alt=""></div>
+      <div class="reel reel-right" data-reel><img src="{{ url_for('static', filename='img/reel.svg') }}" alt=""></div>
+      <div class="cassette-label" data-cassette-label>
+        <span x-text="videoTitle"></span>
+      </div>
     </div>
-    <input type="hidden" name="format" :value="format">
-    <button
-      name="fetch-btn"
-      type="submit"
-      class="btn-primary flex-1 min-h-[44px]"
-    >Fetch</button>
+    <div class="turntable" x-show="mode === 'vinyl'" x-cloak>
+      <div class="vinyl" data-vinyl>
+        <img src="{{ url_for('static', filename='img/vinyl.svg') }}" alt="">
+      </div>
+      <div class="tonearm" data-tonearm>
+        <img src="{{ url_for('static', filename='img/tonearm.svg') }}" alt="">
+      </div>
+    </div>
   </div>
-</form>
 
-<div id="queue" aria-live="polite" class="space-y-3 mt-8"></div>
+  <div class="deck-readout">
+    <div class="digital" :class="{ 'is-rec': status === 'rec', 'is-err': status === 'err' }">
+      <span x-show="status === 'ready'">READY</span>
+      <span x-show="status === 'load'">LOAD ✓</span>
+      <span x-show="status === 'rec'">REC ▶ <span x-text="counter"></span></span>
+      <span x-show="status === 'done'">DONE</span>
+      <span x-show="status === 'err'">ERR</span>
+    </div>
+    <div class="vu-meters">
+      <div class="vu" data-vu="L"><img src="{{ url_for('static', filename='img/vu-meter.svg') }}" alt="VU left"></div>
+      <div class="vu" data-vu="R"><img src="{{ url_for('static', filename='img/vu-meter.svg') }}" alt="VU right"></div>
+    </div>
+  </div>
+
+  <div class="deck-buttons" role="group" aria-label="Deck transport controls">
+    <button type="button" class="deck-btn" disabled aria-label="Rewind">◁◁</button>
+    <button type="button" class="deck-btn" @click="stop()" aria-label="Stop">◻</button>
+    <button
+      type="button"
+      class="deck-btn deck-btn--rec"
+      :class="{ 'is-pressed': status === 'rec' }"
+      @click="rec()"
+      :disabled="status !== 'load'"
+      aria-label="Record"
+    >● REC</button>
+    <button type="button" class="deck-btn" disabled aria-label="Fast forward">▷▷</button>
+    <button
+      type="button"
+      class="deck-btn"
+      @click="eject()"
+      :disabled="status === 'rec' || status === 'ready'"
+      aria-label="Eject"
+    >▲</button>
+  </div>
+
+  <form
+    class="deck-input"
+    hx-post="/api/info-card"
+    hx-target="#card-target"
+    hx-swap="innerHTML"
+    hx-on::before-request="$dispatch('deck:fetching')"
+    hx-on::after-request="$dispatch('deck:fetched')"
+  >
+    <input
+      name="url"
+      type="text"
+      placeholder="PASTE URL ON TAPE LABEL"
+      class="deck-url-input"
+      required
+      autocomplete="off"
+      autocapitalize="off"
+      spellcheck="false"
+    >
+    <input type="hidden" name="format" :value="mode === 'vinyl' ? 'audio' : 'video'">
+    <div class="deck-format-toggle" role="group" aria-label="Format">
+      <button type="button" :data-active="mode === 'tape'" @click="setMode('tape')" class="toggle-btn">MP4</button>
+      <button type="button" :data-active="mode === 'vinyl'" @click="setMode('vinyl')" class="toggle-btn">MP3</button>
+    </div>
+    <button type="submit" class="deck-btn deck-btn--load" :disabled="status === 'rec'">LOAD ▶</button>
+  </form>
+
+  <div id="card-target" hidden></div>
+
+  <div class="deck-shelf" :hidden="shelf.length === 0" aria-live="polite">
+    <template x-for="item in shelf" :key="item.id">
+      <a class="shelf-item" :href="`/api/file/${item.id}`" :download="item.filename" :title="item.title">
+        <span class="shelf-thumb" :class="item.kind === 'vinyl' ? 'is-vinyl' : 'is-cassette'"></span>
+        <span class="shelf-label" x-text="item.title"></span>
+      </a>
+    </template>
+  </div>
+</div>
 {% endblock %}
