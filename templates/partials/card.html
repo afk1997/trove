@@ -1,7 +1,108 @@
+{% set msgs = {
+  "unsupported_url": "This URL is not supported.",
+  "private_or_unavailable": "This video is private or unavailable.",
+  "geo_restricted": "Not available in your region.",
+  "rate_limited": "Hit a rate limit — try again in a minute.",
+  "auth_required": "The site needs login. Set TROVE_COOKIES_FROM_BROWSER and restart.",
+  "network": "Network problem — check your connection.",
+  "timeout": "Request timed out. Try again.",
+  "busy": "Server is busy. Try again in a moment.",
+  "unknown": "Something went wrong.",
+} %}
+
 {% if card.kind == "error" %}
-  <div class="card-error" data-category="{{ card.category }}">URL not supported: {{ card.url }}</div>
-{% else %}
-  <div class="card" data-status="{{ card.kind }}" data-job-id="{{ card.id or '' }}">
-    {{ card.title or 'Untitled' }}
+<div class="card border-error" style="border-color: var(--error)" data-status="error">
+  <div class="flex-1 min-w-0">
+    <p class="text-sm font-medium" style="color: var(--error)">
+      {{ msgs.get(card.category, msgs["unknown"]) }}
+    </p>
+    {% if card.url %}
+      <p class="text-xs mt-1 break-all" style="color: var(--muted)">{{ card.url }}</p>
+    {% endif %}
   </div>
+</div>
+
+{% elif card.kind == "ready" %}
+<div class="card" data-status="ready">
+  <div class="w-28 h-20 sm:w-32 sm:h-20 rounded-md overflow-hidden flex-shrink-0" style="background-color: var(--border)">
+    {% if card.thumbnail %}
+      <img src="{{ card.thumbnail }}" alt="" class="w-full h-full object-cover" loading="lazy">
+    {% endif %}
+  </div>
+  <div class="flex-1 min-w-0">
+    <p class="text-sm font-medium truncate">{{ card.title or "Untitled" }}</p>
+    <p class="text-xs mt-1" style="color: var(--muted)">
+      {{ card.uploader or "" }}
+      {% if card.duration %} · {{ "%d:%02d"|format(card.duration // 60, card.duration % 60) }}{% endif %}
+    </p>
+    <form
+      hx-post="/api/download-card"
+      hx-swap="outerHTML"
+      hx-target="closest .card"
+      class="mt-3 flex flex-wrap gap-2 items-center"
+    >
+      <input type="hidden" name="url" value="{{ card.url }}">
+      <input type="hidden" name="title" value="{{ card.title or '' }}">
+      <input type="hidden" name="format" value="{{ card.format or 'video' }}">
+      {% if card.formats and (card.format or 'video') == 'video' %}
+        <select name="format_id" class="chip">
+          {% for f in card.formats %}
+            <option value="{{ f.id }}">{{ f.label }}</option>
+          {% endfor %}
+        </select>
+      {% endif %}
+      <button type="submit" class="btn-primary !min-h-[44px] !py-2 !px-4 text-sm">Save</button>
+    </form>
+  </div>
+</div>
+
+{% elif card.kind in ("queued", "downloading") %}
+<div
+  class="card"
+  data-status="downloading"
+  data-job-id="{{ card.id }}"
+  hx-get="/api/status-card/{{ card.id }}"
+  hx-trigger="every 1s"
+  hx-swap="outerHTML"
+>
+  <div class="w-28 h-20 rounded-md flex-shrink-0 animate-pulse" style="background-color: var(--border)"></div>
+  <div class="flex-1 min-w-0">
+    <p class="text-sm font-medium truncate">{{ card.title }}</p>
+    <p class="text-xs mt-1" style="color: var(--accent)">Saving…</p>
+  </div>
+</div>
+
+{% elif card.kind == "done" %}
+<div class="card" data-status="done">
+  <div class="w-28 h-20 rounded-md flex-shrink-0 flex items-center justify-center" style="background-color: var(--success); color: white">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="20 6 9 17 4 12"/>
+    </svg>
+  </div>
+  <div class="flex-1 min-w-0">
+    <p class="text-sm font-medium truncate">{{ card.title }}</p>
+    <p class="text-xs mt-1" style="color: var(--muted)">{{ card.filename or "" }}</p>
+    <a
+      href="/api/file/{{ card.id }}"
+      download="{{ card.filename or '' }}"
+      class="btn-primary !min-h-[40px] !py-2 !px-4 text-sm mt-3 inline-flex"
+    >Save to device</a>
+  </div>
+</div>
+
+{% elif card.kind == "cancelled" %}
+<div class="card" data-status="cancelled">
+  <div class="flex-1 min-w-0">
+    <p class="text-sm font-medium" style="color: var(--muted)">Cancelled.</p>
+  </div>
+</div>
+
+{% else %}
+<div class="card border-error" style="border-color: var(--error)" data-status="error">
+  <div class="flex-1 min-w-0">
+    <p class="text-sm font-medium" style="color: var(--error)">
+      {{ msgs.get(card.category, msgs["unknown"]) }}
+    </p>
+  </div>
+</div>
 {% endif %}
