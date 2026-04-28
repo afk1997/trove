@@ -220,7 +220,9 @@ def run_download(
     is provided, switches to a streaming Popen() path that emits progress
     events parsed from yt-dlp's --progress-template output.
 
-    progress_cb signature: (downloaded_bytes:int, total_bytes:int, speed:float, eta:int)
+    progress_cb signature:
+        (downloaded_bytes:int, total_bytes:int, speed:float, eta:int,
+         fragment_index:int, fragment_count:int)
     register_process signature: (popen) — called once with the live Popen handle
     so callers can implement cancellation.
     """
@@ -249,14 +251,19 @@ def run_download(
         return _resolve_output(out_template, format_choice)
 
     # Streaming path: Popen + per-line progress parsing.
-    # yt-dlp writes default progress to stderr; --progress-template outputs may
-    # also land on stderr in subprocess mode. Drain both pipes and look for
-    # the TROVE_PROG marker in either.
+    # yt-dlp emits --progress-template lines to stdout in subprocess mode, but
+    # we drain both pipes anyway and parse the TROVE_PROG marker in either —
+    # belt and suspenders for future yt-dlp internals changes.
+    #
+    # 7 fields per line (separated by `|`): downloaded_bytes, total_bytes (or
+    # total_bytes_estimate), speed, eta, fragment_index, fragment_count. HLS
+    # streams (e.g. YouTube) leave total_bytes as NA but populate fragment_*
+    # so the UI can still render meaningful percent.
     progress_argv = [
         "--newline",
         "--progress",
         "--progress-template",
-        "TROVE_PROG|%(progress.downloaded_bytes)s|%(progress.total_bytes,total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s",
+        "TROVE_PROG|%(progress.downloaded_bytes)s|%(progress.total_bytes,total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|%(progress.fragment_index)s|%(progress.fragment_count)s",
     ]
     streamed_argv = argv[:1] + progress_argv + argv[1:]
 
@@ -280,7 +287,9 @@ def run_download(
         if not line.startswith("TROVE_PROG|") or not progress_cb:
             return False
         parts = line.split("|")
-        if len(parts) != 5:
+        # We expect 7 fields (marker + 6 values). Tolerate older yt-dlp
+        # versions that may not have fragment fields by checking length.
+        if len(parts) < 5:
             return False
         try:
             progress_cb(
@@ -288,6 +297,8 @@ def run_download(
                 _parse_progress_int(parts[2]),
                 _parse_progress_float(parts[3]),
                 _parse_progress_int(parts[4]),
+                _parse_progress_int(parts[5]) if len(parts) > 5 else 0,
+                _parse_progress_int(parts[6]) if len(parts) > 6 else 0,
             )
         except Exception:
             pass

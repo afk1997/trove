@@ -98,6 +98,18 @@
         {% if card.eta %}
           <span class="sep">·</span>ETA {{ "%d:%02d"|format(card.eta // 60, card.eta % 60) }}
         {% endif %}
+      {% elif card.fragment_count %}
+        {{ "%.1f"|format(card.downloaded_bytes / 1048576) }} MB
+        <span class="sep">·</span>{{ card.percent }}%
+        <span class="sep">·</span>FRAG {{ card.fragment_index }}/{{ card.fragment_count }}
+        {% if card.speed %}
+          <span class="sep">·</span>{{ "%.1f"|format(card.speed / 1048576) }} MB/s
+        {% endif %}
+      {% elif card.downloaded_bytes %}
+        {{ "%.1f"|format(card.downloaded_bytes / 1048576) }} MB DOWNLOADED
+        {% if card.speed %}
+          <span class="sep">·</span>{{ "%.1f"|format(card.speed / 1048576) }} MB/s
+        {% endif %}
       {% else %}
         STARTING…
       {% endif %}

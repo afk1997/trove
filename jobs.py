@@ -37,6 +37,9 @@ class Job:
     total_bytes: int = 0
     speed: float = 0.0  # bytes/sec
     eta: int = 0  # seconds remaining
+    # HLS / fragmented downloads expose fragment counts even when total_bytes is unknown.
+    fragment_index: int = 0
+    fragment_count: int = 0
 
 
 class JobManager:

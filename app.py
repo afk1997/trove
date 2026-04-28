@@ -195,11 +195,13 @@ def create_app() -> Flask:
             job.thumbnail = thumbnail
             out_template = str(DOWNLOAD_DIR / f"{job.id}.%(ext)s")
 
-            def _on_progress(downloaded, total, speed, eta):
+            def _on_progress(downloaded, total, speed, eta, frag_idx, frag_count):
                 job.downloaded_bytes = downloaded
                 job.total_bytes = total
                 job.speed = speed
                 job.eta = eta
+                job.fragment_index = frag_idx
+                job.fragment_count = frag_count
 
             def _register_proc(popen):
                 job.process = popen
@@ -224,9 +226,13 @@ def create_app() -> Flask:
         return job_manager.submit(target=_work, title=title, url=url)
 
     def _card_view(job: Job) -> dict:
+        # Bytes-based percent when we know the total. HLS streams (YouTube) leave
+        # total_bytes at 0 — fall back to fragment ratio so the bar still moves.
         percent = 0
         if job.total_bytes > 0:
             percent = min(100, int(job.downloaded_bytes / job.total_bytes * 100))
+        elif job.fragment_count > 0 and job.fragment_index > 0:
+            percent = min(100, int(job.fragment_index / job.fragment_count * 100))
         return {
             "kind": job.status.value,
             "id": job.id,
@@ -239,6 +245,8 @@ def create_app() -> Flask:
             "total_bytes": job.total_bytes,
             "speed": job.speed,
             "eta": job.eta,
+            "fragment_index": job.fragment_index,
+            "fragment_count": job.fragment_count,
             "percent": percent,
         }
 
