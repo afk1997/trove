@@ -1,55 +1,83 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="mx-auto max-w-2xl px-5 pt-16 pb-24 sm:pt-24">
-  <header class="text-center mb-14 sm:mb-16">
-    <h1 class="wordmark">TROVE</h1>
-    <p class="tagline mt-3">Save things you care about</p>
-  </header>
+<div class="hero-stage">
+  <span class="hero-corner-stamp">No. 001 / 2026</span>
+
+  <div class="hero-top">
+    <div class="left">
+      <span class="dot"></span>
+      <span>TROVE — A SAVING MACHINE FOR THE MODERN WEB</span>
+    </div>
+    <span class="right">EST. MMXXVI</span>
+  </div>
+
+  <div class="hero-mark-row">
+    <h1 class="hero-mark">trove<span class="period">.</span></h1>
+    <span class="hero-arrow" aria-hidden="true">↗</span>
+  </div>
+
+  <p class="hero-tag">
+    paste a link, get the file.
+    <span class="accent">no accounts, no upload limits, no telemetry.</span>
+    self-hosted on your machine.
+  </p>
 
   <form
     id="fetch-form"
+    class="hero-plate"
     hx-post="/api/info-card"
     hx-target="#queue"
     hx-swap="afterbegin"
-    class="space-y-3"
   >
-    <label class="sr-only" for="urls">Paste a link</label>
-    <input
-      id="urls"
-      name="url"
-      type="url"
-      placeholder="paste a link"
-      autocomplete="off"
-      autocapitalize="off"
-      spellcheck="false"
-      required
-      class="panel-input"
-    >
-
+    <div class="hero-plate-header">
+      <span>▸ <span class="step">STEP 001</span> · paste a link</span>
+      <span>1000+ sources</span>
+    </div>
+    <div class="hero-input-row">
+      <label class="sr-only" for="urls">Paste a link</label>
+      <input
+        id="urls"
+        name="url"
+        type="url"
+        placeholder="https://www.youtube.com/watch?v=…"
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+        required
+        class="hero-input"
+      >
+    </div>
     <input type="hidden" name="format" id="format-input" value="video">
-    <div class="flex gap-2 items-center">
-      <div class="format-toggle" role="group" aria-label="Format">
-        <button type="button" class="chip is-active" data-format="video">MP4</button>
-        <button type="button" class="chip" data-format="audio">MP3</button>
+    <div class="hero-controls">
+      <div class="hero-toggle" role="group" aria-label="Format">
+        <button type="button" class="hero-pill is-active" data-format="video">MP4</button>
+        <button type="button" class="hero-pill" data-format="audio">MP3</button>
       </div>
-      <span class="flex-1"></span>
-      <button type="submit" class="btn-primary" id="fetch-btn">FETCH</button>
+      <button type="submit" class="hero-cta" id="fetch-btn">Save ↗</button>
     </div>
   </form>
 
-  <p class="tagline text-center mt-4 opacity-60" style="font-size: 12px; letter-spacing: 0.16em">
-    youtube · tiktok · instagram · vimeo · 1000+ more
-  </p>
+  <div class="hero-ticker">
+    <span>▼ youtube · tiktok · instagram · vimeo · 1000+</span>
+    <span class="right">MIT · SELF-HOSTED · v1.0</span>
+  </div>
+</div>
 
-  <div id="queue" aria-live="polite" class="mt-10 space-y-3"></div>
+<div class="queue-stack">
+  <div id="empty-hint" class="empty-hint">
+    <div class="arrow-up" aria-hidden="true">↑</div>
+    <p class="line-1">your clippings will appear here.</p>
+    <p class="line-2">paste a link above to begin</p>
+  </div>
+  <div id="queue" aria-live="polite"></div>
 </div>
 
 <script nonce="{{ g.csp_nonce }}">
   // Format toggle (vanilla — strict CSP blocks Alpine's eval-based directives)
-  document.querySelectorAll('.format-toggle .chip').forEach(function (btn) {
+  document.querySelectorAll('.hero-toggle .hero-pill').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      document.querySelectorAll('.format-toggle .chip').forEach(function (c) {
+      document.querySelectorAll('.hero-toggle .hero-pill').forEach(function (c) {
         c.classList.remove('is-active');
       });
       btn.classList.add('is-active');
@@ -57,23 +85,34 @@
     });
   });
 
-  // FETCH button label state, reset form, persist format selection across resets
+  // Fetch button label state, reset form, persist format selection across resets,
+  // hide empty-state hint as soon as first card lands
   (function () {
     var form = document.getElementById('fetch-form');
     var btn = document.getElementById('fetch-btn');
+    var hint = document.getElementById('empty-hint');
+    var pills = document.querySelectorAll('.hero-toggle .hero-pill');
     form.addEventListener('htmx:beforeRequest', function () {
       btn.disabled = true;
-      btn.textContent = 'FETCHING…';
+      btn.classList.add('is-fetching');
+      btn.innerHTML = 'Fetching<span class="ellipsis">…</span>';
+      pills.forEach(function (p) { p.disabled = true; });
     });
     form.addEventListener('htmx:afterRequest', function () {
       btn.disabled = false;
-      btn.textContent = 'FETCH';
+      btn.classList.remove('is-fetching');
+      btn.textContent = 'Save ↗';
+      pills.forEach(function (p) { p.disabled = false; });
       var keepFormat = document.getElementById('format-input').value;
       form.reset();
       document.getElementById('format-input').value = keepFormat;
-      document.querySelectorAll('.format-toggle .chip').forEach(function (c) {
+      pills.forEach(function (c) {
         c.classList.toggle('is-active', c.dataset.format === keepFormat);
       });
+      // Hide empty-state hint once a card has landed
+      if (hint && document.querySelectorAll('#queue .clip').length > 0) {
+        hint.style.display = 'none';
+      }
     });
   })();
 </script>
