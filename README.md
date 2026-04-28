@@ -96,4 +96,4 @@ MIT. see [LICENSE](LICENSE).
 
 ---
 
-originally inspired by [averygan/reclip](https://github.com/averygan/reclip) (MIT). trove has since diverged into its own project — different brand, different UI, different feature set.
+inspired by [averygan/reclip](https://github.com/averygan/reclip) (MIT).
