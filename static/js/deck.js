@@ -16,6 +16,46 @@
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(cur)); } catch (_) {}
   }
 
+  // === Procedural audio module ===
+  const audio = (function () {
+    let ctx = null;
+    function ensureCtx() {
+      if (!ctx && typeof AudioContext !== 'undefined') ctx = new AudioContext();
+      return ctx;
+    }
+    function envelope(node, peak, attack, release) {
+      const t = ctx.currentTime;
+      node.gain.setValueAtTime(0, t);
+      node.gain.linearRampToValueAtTime(peak, t + attack);
+      node.gain.linearRampToValueAtTime(0, t + attack + release);
+    }
+    function noiseBurst(duration, peak) {
+      const c = ensureCtx(); if (!c) return;
+      const buffer = c.createBuffer(1, c.sampleRate * duration, c.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 0.6;
+      const src = c.createBufferSource(); src.buffer = buffer;
+      const gain = c.createGain();
+      envelope(gain, peak, 0.005, duration - 0.01);
+      src.connect(gain).connect(c.destination); src.start();
+    }
+    function tone(freq, duration, peak, type) {
+      const c = ensureCtx(); if (!c) return;
+      const osc = c.createOscillator(); osc.frequency.value = freq; osc.type = type || 'sine';
+      const gain = c.createGain();
+      envelope(gain, peak, 0.005, duration);
+      osc.connect(gain).connect(c.destination); osc.start();
+      osc.stop(c.currentTime + duration + 0.05);
+    }
+    return {
+      clunkOpen() { noiseBurst(0.08, 0.5); tone(180, 0.12, 0.2, 'square'); },
+      clunkClose() { noiseBurst(0.06, 0.4); tone(120, 0.18, 0.25, 'square'); },
+      click() { noiseBurst(0.02, 0.3); },
+      chime() { tone(880, 0.18, 0.18, 'sine'); setTimeout(() => tone(1320, 0.22, 0.16, 'sine'), 120); },
+      buzz() { tone(110, 0.4, 0.18, 'sawtooth'); },
+    };
+  })();
+
   window.trove = window.trove || {};
 
   window.trove.deck = function () {
@@ -55,6 +95,7 @@
       _consumeCard(card) {
         const status = card.dataset.status;
         if (status === 'error') {
+          if (this.soundOn) audio.buzz();
           this.status = 'err';
           this.videoTitle = card.dataset.title || '';
           return;
@@ -73,6 +114,7 @@
           return;
         }
         if (status === 'done') {
+          if (this.soundOn) audio.chime();
           this.status = 'done';
           this.jobId = card.dataset.jobId || this.jobId;
           this._addToShelf({
@@ -127,10 +169,11 @@
       // Action methods
       rec() {
         if (this.status !== 'load') return;
+        if (this.soundOn) audio.click();
         const tl = this._gsap()?.timeline();
         if (tl) {
           tl.to('.deck-btn--rec', { y: 2, duration: 0.05 })
-            .to('.cassette', { scale: 1.0, duration: 0.1 })
+            .add(() => { if (this.soundOn) audio.clunkClose(); })
             .add(() => this._submitDownload());
         } else {
           this._submitDownload();
@@ -158,6 +201,7 @@
       stop() { /* future: cancel + reset */ },
 
       eject() {
+        if (this.soundOn) audio.clunkOpen();
         const tl = this._gsap()?.timeline();
         if (tl) {
           tl.to('.cassette', { y: -8, duration: 0.4, ease: 'power2.out' })
