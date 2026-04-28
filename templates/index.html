@@ -1,2 +1,55 @@
-<!doctype html>
-<html><head><title>Trove</title></head><body><h1>Trove</h1></body></html>
+{% extends "base.html" %}
+
+{% block content %}
+<form
+  id="fetch-form"
+  hx-post="/api/info-card"
+  hx-target="#queue"
+  hx-swap="beforeend"
+  hx-on::before-request="this.querySelector('[name=fetch-btn]').disabled = true"
+  hx-on::after-request="this.querySelector('[name=fetch-btn]').disabled = false; this.reset()"
+  class="space-y-4"
+>
+  <div>
+    <label for="urls" class="sr-only">Paste a link</label>
+    <textarea
+      id="urls"
+      name="url"
+      rows="2"
+      placeholder="Paste a link to get started…"
+      class="w-full px-5 py-4 text-base bg-surface border rounded shadow-card focus:outline-none focus:border-accent"
+      style="background-color: var(--surface); border-color: var(--border)"
+    ></textarea>
+    <p class="text-xs mt-2" style="color: var(--muted)">
+      YouTube · TikTok · Instagram · Vimeo · 1000+ more
+    </p>
+  </div>
+
+  <div class="flex gap-3 items-center" x-data="{ format: 'video' }">
+    <div class="inline-flex p-1 rounded-lg" style="background-color: var(--surface); border: 1px solid var(--border)">
+      <button
+        type="button"
+        @click="format = 'video'"
+        :class="format === 'video' ? 'bg-fg text-bg' : ''"
+        :style="format === 'video' ? 'background-color: var(--fg); color: var(--bg)' : ''"
+        class="px-4 py-2 rounded-md text-sm font-medium transition"
+      >MP4</button>
+      <button
+        type="button"
+        @click="format = 'audio'"
+        :class="format === 'audio' ? 'bg-fg text-bg' : ''"
+        :style="format === 'audio' ? 'background-color: var(--fg); color: var(--bg)' : ''"
+        class="px-4 py-2 rounded-md text-sm font-medium transition"
+      >MP3</button>
+    </div>
+    <input type="hidden" name="format" :value="format">
+    <button
+      name="fetch-btn"
+      type="submit"
+      class="btn-primary flex-1 min-h-[44px]"
+    >Fetch</button>
+  </div>
+</form>
+
+<div id="queue" aria-live="polite" class="space-y-3 mt-8"></div>
+{% endblock %}
