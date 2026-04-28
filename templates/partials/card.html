@@ -96,7 +96,7 @@
 </div>
 
 {% elif card.kind == "done" %}
-<div class="clip is-done">
+<div class="clip is-done" data-status="done">
   {{ thumb(card) }}
   <div class="clip-body">
     <p class="clip-title">{{ card.title or "untitled" }}</p>
