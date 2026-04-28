@@ -27,7 +27,9 @@ def test_argument_injection_url_rejected_card(client, monkeypatch):
     monkeypatch.setattr("runner.subprocess.run", lambda *a, **kw: called.append(a) or _ok(""))
     r = client.post("/api/info-card", data={"url": "--exec=touch /tmp/pwned"})
     assert r.status_code == 400
-    assert b"not supported" in r.data.lower() or b"unsupported" in r.data.lower()
+    body = r.data.decode()
+    assert 'data-status="error"' in body
+    assert 'data-category="unsupported_url"' in body
     assert called == []
 
 
@@ -71,3 +73,38 @@ class _Completed:
 
 def _ok(stderr=""):
     return _Completed(stderr=stderr)
+
+
+def test_index_renders_with_deck_assets(client):
+    r = client.get("/")
+    assert r.status_code == 200
+    body = r.data.decode()
+    assert 'css/deck.css' in body
+    assert 'vendor/gsap.min.js' in body
+    assert 'js/deck.js' in body
+    assert 'id="deck"' in body
+    # Footer attribution must be gone.
+    assert 'averygan/reclip' not in body
+
+
+def test_card_partial_emits_data_attributes(client, monkeypatch):
+    import json as _json
+    fake_stdout = _json.dumps({
+        "title": "T", "thumbnail": "https://x/y.jpg", "duration": 30,
+        "uploader": "U",
+        "formats": [{"format_id": "137", "height": 1080, "vcodec": "avc1", "tbr": 5000}],
+    })
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = fake_stdout
+        stderr = ""
+
+    monkeypatch.setattr("runner.subprocess.run", lambda *a, **kw: FakeCompleted())
+    r = client.post("/api/info-card", data={"url": "https://www.youtube.com/watch?v=abc"})
+    assert r.status_code == 200
+    body = r.data.decode()
+    assert 'data-status="ready"' in body
+    assert 'data-title="T"' in body
+    assert 'data-uploader="U"' in body
+    assert 'data-formats=' in body
