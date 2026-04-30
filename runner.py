@@ -42,9 +42,17 @@ def build_download_argv(
 ) -> list[str]:
     """Build argv for the actual download. Always uses `--` separator."""
     _check_url_shape(url)
+    try:
+        _cf = int(os.environ.get("TROVE_CONCURRENT_FRAGMENTS", "4"))
+    except (ValueError, TypeError):
+        _cf = 4
+    concurrent_fragments = max(1, min(32, _cf))
     argv: list[str] = [
         "yt-dlp",
         "--no-playlist",
+        "--concurrent-fragments", str(concurrent_fragments),
+        "--retries", "5",
+        "--fragment-retries", "10",
         "-o", out_template,
         *_cookie_args(),
     ]

@@ -223,3 +223,58 @@ def test_run_download_cleans_orphans_on_timeout(monkeypatch, tmp_path):
     assert res.error_category == "timeout"
     assert not (tmp_path / "abc.part").exists()
     assert not (tmp_path / "abc.webm").exists()
+
+
+def test_download_argv_includes_concurrent_fragments():
+    argv = build_download_argv(
+        url="https://example.com/v",
+        out_template="/tmp/x.%(ext)s",
+        format_choice="video",
+        format_id=None,
+    )
+    idx = argv.index("--concurrent-fragments")
+    assert argv[idx + 1] == "4"  # default
+
+
+def test_download_argv_concurrent_fragments_env_clamps_high(monkeypatch):
+    monkeypatch.setenv("TROVE_CONCURRENT_FRAGMENTS", "100")
+    argv = build_download_argv(
+        url="https://example.com/v", out_template="/tmp/x.%(ext)s",
+        format_choice="video", format_id=None,
+    )
+    idx = argv.index("--concurrent-fragments")
+    assert argv[idx + 1] == "32"  # clamped to max
+
+
+def test_download_argv_concurrent_fragments_env_clamps_low(monkeypatch):
+    monkeypatch.setenv("TROVE_CONCURRENT_FRAGMENTS", "0")
+    argv = build_download_argv(
+        url="https://example.com/v", out_template="/tmp/x.%(ext)s",
+        format_choice="video", format_id=None,
+    )
+    idx = argv.index("--concurrent-fragments")
+    assert argv[idx + 1] == "1"  # clamped to min
+
+
+def test_download_argv_concurrent_fragments_env_handles_garbage(monkeypatch):
+    """Non-int env var should fall back to default 4, not crash."""
+    monkeypatch.setenv("TROVE_CONCURRENT_FRAGMENTS", "not-a-number")
+    argv = build_download_argv(
+        url="https://example.com/v", out_template="/tmp/x.%(ext)s",
+        format_choice="video", format_id=None,
+    )
+    idx = argv.index("--concurrent-fragments")
+    assert argv[idx + 1] == "4"  # fallback to default
+
+
+def test_download_argv_includes_retry_flags():
+    argv = build_download_argv(
+        url="https://example.com/v",
+        out_template="/tmp/x.%(ext)s",
+        format_choice="video",
+        format_id=None,
+    )
+    r_idx = argv.index("--retries")
+    fr_idx = argv.index("--fragment-retries")
+    assert argv[r_idx + 1] == "5"
+    assert argv[fr_idx + 1] == "10"
