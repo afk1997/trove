@@ -188,6 +188,17 @@ def create_app() -> Flask:
             return "", 200
         return render_template("partials/card.html", card=_card_view(job))
 
+    @app.post("/api/job/<job_id>/pause")
+    @token_required
+    def api_job_pause(job_id):
+        ok = job_manager.pause(job_id)
+        if not ok:
+            return "", 404
+        job = job_manager.get(job_id)
+        if job is None:
+            return "", 404
+        return render_template("partials/card.html", card=_card_view(job))
+
     # --- helpers -----------------------------------------------------------
 
     def _enqueue_download(url: str, format_choice: str, format_id, title: str, thumbnail: str = "") -> str:
