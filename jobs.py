@@ -143,9 +143,10 @@ class JobManager:
     def snapshot_jobs(self) -> list[Job]:
         """Return a list copy of the current jobs in insertion order.
 
-        Used for rendering persisted jobs on page reload — the caller filters
-        by status. Returns the live Job objects (not copies); the lock is
-        released before the caller iterates.
+        Returns live Job references — the caller may observe torn reads of
+        `downloaded_bytes` / `total_bytes` etc. if a worker thread mutates
+        them mid-render. That's cosmetic (the next 2s status poll resolves
+        it). Used for rendering persisted jobs on page reload.
         """
         with self._lock:
             return list(self._jobs.values())

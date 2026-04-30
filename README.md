@@ -59,7 +59,7 @@ docker run -p 8899:8899 -e HOST=0.0.0.0 trove
 | `TROVE_MAX_WORKERS` | `4` | concurrent downloads. excess returns HTTP 503. |
 | `TROVE_RATE_LIMIT` | `30` | requests per minute per IP. set to `0` to disable. |
 
-> **Note on `TROVE_TOKEN` + tab-close auto-pause:** when a token is set, the browser's `navigator.sendBeacon` cannot attach the `Authorization` header, so closing the tab mid-download will not POST to `/api/job/<id>/pause`. The job stays running until the server stops; on restart, any non-completed job is downgraded to `paused` and reappears in the queue, so no work is lost — the UX is just deferred until restart. Local (`HOST=127.0.0.1`, no token) deployments are unaffected.
+> **Note on `TROVE_TOKEN` + tab-close auto-pause:** when a token is set, the browser's `navigator.sendBeacon` cannot attach the `Authorization` header, so closing the tab mid-download will not POST to `/api/job/<id>/pause`. The download continues running on the server until it finishes naturally — or, if you stop the server first, it is downgraded to `paused` on next restart and reappears in the queue. No work is lost either way; only the live "pause indicator" UX is deferred. Local (`HOST=127.0.0.1`, no token) deployments are unaffected.
 
 ## exposing to LAN or the internet
 

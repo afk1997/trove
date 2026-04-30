@@ -330,8 +330,11 @@ def test_runner_success_during_pause_window_promotes_to_done(tmp_path):
             job._was_paused = True
 
     jid = jm.submit(target=work, title="t", url="https://x")
-    for _ in range(100):
-        if jm.get(jid).status in {JobStatus.DONE, JobStatus.PAUSED}:
+    # Wait specifically for DONE — under load _run may not have re-acquired
+    # the lock yet so we'd briefly see PAUSED, but the race-promotion path
+    # must converge on DONE.
+    for _ in range(200):
+        if jm.get(jid).status == JobStatus.DONE:
             break
         time.sleep(0.02)
 

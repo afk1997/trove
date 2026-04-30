@@ -72,7 +72,7 @@
   </div>
   {% endif %}
   <div id="queue" aria-live="polite">
-    {% for card in initial_cards %}{% include "partials/card.html" %}{% endfor %}
+    {% for card in initial_cards %}{% set initial_render = True %}{% include "partials/card.html" %}{% endfor %}
   </div>
 </div>
 

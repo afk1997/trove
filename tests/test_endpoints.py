@@ -135,3 +135,24 @@ def test_index_renders_persisted_paused_jobs(client):
     assert "is-paused" in body
     assert "Persisted Title" in body
     assert "▶</span> resume" in body  # decorative glyph wrapped per a11y
+
+
+def test_index_persisted_done_cards_marked_already_downloaded(client):
+    """Persisted DONE cards must carry data-auto-downloaded so the JS auto-
+    downloader doesn't re-trigger every saved file on next htmx swap.
+    """
+    from jobs import Job, JobStatus
+    jm = client.application.extensions["trove.jobs"]
+    with jm._lock:
+        jm._jobs["donejob1"] = Job(
+            id="donejob1", url="https://e.com", title="Done Already",
+            status=JobStatus.DONE, file_path="/tmp/x.mp4", filename="x.mp4",
+        )
+    body = client.get("/").data.decode()
+    assert "is-done" in body
+    assert 'data-auto-downloaded="1"' in body
+    # Sanity: a freshly-completed download via htmx swap (status-card path)
+    # must NOT carry the marker — the JS attaches it on first auto-click.
+    fresh = client.get("/api/status-card/donejob1").data.decode()
+    assert "is-done" in fresh
+    assert 'data-auto-downloaded' not in fresh
