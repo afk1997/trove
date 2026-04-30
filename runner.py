@@ -220,6 +220,7 @@ def run_download(
     timeout: int = 300,
     progress_cb=None,
     register_process=None,
+    was_paused_check: object = None,
 ) -> DownloadResult:
     """Run yt-dlp to download a media file.
 
@@ -339,7 +340,8 @@ def run_download(
                 proc.wait(timeout=2)
             except Exception:
                 pass
-            _cleanup_glob(out_template)
+            if not (was_paused_check and was_paused_check()):
+                _cleanup_glob(out_template)
             return DownloadResult(error_category="timeout", error_raw="download timed out")
         time.sleep(0.2)
 
@@ -348,10 +350,14 @@ def run_download(
     stderr_text = "".join(stderr_buf)
 
     if proc.returncode != 0:
-        _cleanup_glob(out_template)
+        # If the JobManager paused this job (vs. a real error), preserve .part
+        # files so resume can continue where we left off.
+        was_paused = bool(was_paused_check and was_paused_check())
+        if not was_paused:
+            _cleanup_glob(out_template)
         stripped = stderr_text.strip()
         return DownloadResult(
-            error_category=classify_error(stderr_text),
+            error_category="cancelled" if was_paused else classify_error(stderr_text),
             error_raw=stripped.splitlines()[-1] if stripped else "",
         )
 
