@@ -109,3 +109,85 @@ def test_job_dataclass_has_resume_fields():
     assert j.format_id is None
     assert j.out_template == ""
     assert j._was_paused is False
+
+
+def test_jobmanager_persists_on_state_change(tmp_path):
+    from jobs_store import load_jobs
+    store_path = tmp_path / "jobs.json"
+    jm = JobManager(max_workers=1, ttl_seconds=60, store_path=store_path)
+
+    jid = jm.submit(target=lambda j: None, title="hi", url="https://x")
+    # Wait for the worker to finish
+    for _ in range(50):
+        if jm.get(jid).status == JobStatus.DONE:
+            break
+        time.sleep(0.05)
+
+    # The store file should exist and contain the job
+    assert store_path.exists()
+    loaded = load_jobs(store_path)
+    assert jid in loaded
+    assert loaded[jid].status == JobStatus.DONE
+    jm.shutdown()
+
+
+def test_jobmanager_load_downgrades_downloading_to_paused(tmp_path):
+    """After a crash/restart, jobs left in DOWNLOADING are reset to PAUSED."""
+    from jobs_store import persist_atomic
+    store_path = tmp_path / "jobs.json"
+    job = Job(
+        id="abc", url="https://e.com/v", title="t",
+        status=JobStatus.DOWNLOADING,
+        out_template=str(tmp_path / "abc.%(ext)s"),
+    )
+    persist_atomic({"abc": job}, store_path)
+
+    jm = JobManager(max_workers=1, ttl_seconds=60, store_path=store_path)
+    j = jm.get("abc")
+    assert j is not None
+    assert j.status == JobStatus.PAUSED  # downgraded from DOWNLOADING
+    jm.shutdown()
+
+
+def test_jobmanager_load_downgrades_queued_to_paused(tmp_path):
+    """QUEUED jobs at startup also become PAUSED — their work thunk is gone."""
+    from jobs_store import persist_atomic
+    store_path = tmp_path / "jobs.json"
+    job = Job(
+        id="abc", url="https://e.com/v", title="t",
+        status=JobStatus.QUEUED,
+        out_template=str(tmp_path / "abc.%(ext)s"),
+    )
+    persist_atomic({"abc": job}, store_path)
+
+    jm = JobManager(max_workers=1, ttl_seconds=60, store_path=store_path)
+    assert jm.get("abc").status == JobStatus.PAUSED
+    jm.shutdown()
+
+
+def test_jobmanager_load_drops_cancelled(tmp_path):
+    from jobs_store import persist_atomic
+    store_path = tmp_path / "jobs.json"
+    persist_atomic(
+        {"x": Job(id="x", url="https://e.com", title="t", status=JobStatus.CANCELLED)},
+        store_path,
+    )
+    jm = JobManager(max_workers=1, ttl_seconds=60, store_path=store_path)
+    assert jm.get("x") is None
+    jm.shutdown()
+
+
+def test_jobmanager_load_keeps_done_and_error(tmp_path):
+    from jobs_store import persist_atomic
+    store_path = tmp_path / "jobs.json"
+    persist_atomic(
+        {
+            "d": Job(id="d", url="https://e.com/1", title="d", status=JobStatus.DONE),
+            "e": Job(id="e", url="https://e.com/2", title="e", status=JobStatus.ERROR),
+        },
+        store_path,
+    )
+    jm = JobManager(max_workers=1, ttl_seconds=60, store_path=store_path)
+    assert jm.get("d").status == JobStatus.DONE
+    assert jm.get("e").status == JobStatus.ERROR
+    jm.shutdown()

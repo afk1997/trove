@@ -51,14 +51,49 @@ class Job:
 
 
 class JobManager:
-    def __init__(self, *, max_workers: int = 4, ttl_seconds: int = 3600, queue_size: int | None = None):
+    def __init__(
+        self,
+        *,
+        max_workers: int = 4,
+        ttl_seconds: int = 3600,
+        queue_size: int | None = None,
+        store_path: object = None,  # Path or None; None disables persistence
+    ):
+        from pathlib import Path  # local import to avoid module-level coupling
         self.max_workers = max_workers
         self.ttl_seconds = ttl_seconds
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._inflight = 0
-        self._queue_size = queue_size  # None = unlimited; 0 = no queue, must be free worker
+        self._queue_size = queue_size
+        self._store_path = Path(store_path) if store_path else None
+        if self._store_path is not None:
+            self._load_from_store()
+
+    def _load_from_store(self) -> None:
+        from jobs_store import load_jobs
+        loaded = load_jobs(self._store_path)
+        for jid, job in loaded.items():
+            # Downgrade rules per design §4.2:
+            # DOWNLOADING / QUEUED → PAUSED (interrupted by restart, no live thunk)
+            # CANCELLED dropped (no point keeping)
+            # DONE / ERROR / PAUSED kept as-is
+            if job.status in (JobStatus.DOWNLOADING, JobStatus.QUEUED):
+                job.status = JobStatus.PAUSED
+            elif job.status == JobStatus.CANCELLED:
+                continue
+            self._jobs[jid] = job
+
+    def _persist(self) -> None:
+        if self._store_path is None:
+            return
+        try:
+            from jobs_store import persist_atomic
+            persist_atomic(self._jobs, self._store_path)
+        except Exception:
+            # Persistence failure shouldn't crash a download.
+            pass
 
     def submit(self, *, target: Callable[[Job], None], title: str, url: str) -> str:
         job_id = uuid.uuid4().hex[:10]
@@ -68,21 +103,25 @@ class JobManager:
                 raise RuntimeError("pool full")
             self._jobs[job_id] = job
             self._inflight += 1
+        self._persist()
 
         def _run():
-            time.sleep(0.001)  # Let main thread return from submit() first
+            time.sleep(0.001)
             try:
                 with self._lock:
                     job.status = JobStatus.DOWNLOADING
+                self._persist()
                 target(job)
                 with self._lock:
-                    if job.status not in {JobStatus.ERROR, JobStatus.CANCELLED}:
+                    if job.status not in {JobStatus.ERROR, JobStatus.CANCELLED, JobStatus.PAUSED}:
                         job.status = JobStatus.DONE
+                self._persist()
             except Exception as e:
                 with self._lock:
                     job.status = JobStatus.ERROR
                     job.error_category = job.error_category or "unknown"
                     job.error_message = job.error_message or str(e)
+                self._persist()
             finally:
                 with self._lock:
                     self._inflight -= 1
@@ -104,25 +143,24 @@ class JobManager:
                 return False
             proc = job.process
             if job.status in {JobStatus.DONE, JobStatus.ERROR, JobStatus.CANCELLED}:
-                # If finished, treat cancel as cleanup.
                 if job.file_path and os.path.exists(job.file_path):
                     try:
                         os.remove(job.file_path)
                     except OSError:
                         pass
                 job.status = JobStatus.CANCELLED
+                self._persist()
                 return True
             job.status = JobStatus.CANCELLED
-        # Outside lock: kill the subprocess if any.
         if proc is not None and hasattr(proc, "kill"):
             try:
                 proc.kill()
             except Exception:
                 pass
+        self._persist()
         return True
 
     def sweep(self) -> int:
-        """Drop done/errored/cancelled jobs older than ttl_seconds. Returns count removed."""
         cutoff = time.monotonic() - self.ttl_seconds
         removed = 0
         with self._lock:
@@ -139,6 +177,8 @@ class JobManager:
                     except OSError:
                         pass
                 removed += 1
+        if removed:
+            self._persist()
         return removed
 
     def start_sweeper(self, interval_seconds: int = 300) -> None:
