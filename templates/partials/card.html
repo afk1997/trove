@@ -140,6 +140,53 @@
   </div>
 </div>
 
+{% elif card.kind == "paused" %}
+<div
+  class="clip is-paused"
+  data-job-id="{{ card.id }}"
+  data-status="paused"
+>
+  {{ thumb(card) }}
+  <div class="clip-body">
+    <p class="clip-title">{{ card.title or "untitled" }}</p>
+    <p class="clip-meta">
+      {% if card.total_bytes %}
+        {{ "%.1f"|format(card.downloaded_bytes / 1048576) }} MB
+        <span class="sep">/</span>{{ "%.1f"|format(card.total_bytes / 1048576) }} MB
+        <span class="sep">·</span>{{ card.percent }}%
+      {% elif card.fragment_count %}
+        {{ "%.1f"|format(card.downloaded_bytes / 1048576) }} MB
+        <span class="sep">·</span>{{ card.percent }}%
+        <span class="sep">·</span>FRAG {{ card.fragment_index }}/{{ card.fragment_count }}
+      {% else %}
+        PAUSED
+      {% endif %}
+      {% if card.total_bytes or card.fragment_count %}<span class="sep">·</span>PAUSED{% endif %}
+    </p>
+  </div>
+  <div class="clip-action">
+    <button
+      type="button"
+      class="clip-resume"
+      hx-post="/api/job/{{ card.id }}/resume"
+      hx-target="closest .clip"
+      hx-swap="outerHTML transition:true"
+      title="Resume download"
+    >▶ resume</button>
+    <button
+      type="button"
+      class="clip-cancel"
+      hx-post="/api/job/{{ card.id }}/cancel"
+      hx-target="closest .clip"
+      hx-swap="outerHTML transition:true"
+      title="Cancel download (deletes partial bytes)"
+    >✕</button>
+  </div>
+  <div class="clip-progress">
+    <div class="clip-progress-fill" style="width: {{ card.percent or 0 }}%"></div>
+  </div>
+</div>
+
 {% elif card.kind == "cancelled" %}
 <div class="clip is-cancelled">
   <div class="clip-thumb">
