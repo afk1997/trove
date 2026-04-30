@@ -199,12 +199,72 @@ def create_app() -> Flask:
             return "", 404
         return render_template("partials/card.html", card=_card_view(job))
 
+    @app.post("/api/job/<job_id>/resume")
+    @token_required
+    def api_job_resume(job_id):
+        job = job_manager.get(job_id)
+        if job is None:
+            return "", 404
+
+        # Reconstruct the work thunk from the persisted resume_args.
+        url = job.url
+        format_choice = job.format_choice
+        format_id = job.format_id
+        title = job.title
+        thumbnail = job.thumbnail
+        out_template = job.out_template or str(DOWNLOAD_DIR / f"{job.id}.%(ext)s")
+
+        def _work(j: Job):
+            j.thumbnail = thumbnail
+            j.format_choice = format_choice
+            j.format_id = format_id
+            j.out_template = out_template
+
+            def _on_progress(downloaded, total, speed, eta, frag_idx, frag_count):
+                j.downloaded_bytes = downloaded
+                j.total_bytes = total
+                j.speed = speed
+                j.eta = eta
+                j.fragment_index = frag_idx
+                j.fragment_count = frag_count
+
+            def _register_proc(popen):
+                j.process = popen
+
+            result = run_download(
+                url=url,
+                out_template=out_template,
+                format_choice=format_choice,
+                format_id=format_id,
+                progress_cb=_on_progress,
+                register_process=_register_proc,
+                was_paused_check=lambda: j._was_paused,
+            )
+            if result.error_category:
+                if not j._was_paused:
+                    j.status = JobStatus.ERROR
+                    j.error_category = result.error_category
+                    j.error_message = result.error_raw
+                return
+            ext = os.path.splitext(result.file_path)[1] if result.file_path else ""
+            j.file_path = result.file_path
+            j.filename = sanitize_filename(title, ext)
+
+        ok = job_manager.resume(job_id, target=_work)
+        if not ok:
+            return "", 404
+        job = job_manager.get(job_id)
+        return render_template("partials/card.html", card=_card_view(job))
+
     # --- helpers -----------------------------------------------------------
 
     def _enqueue_download(url: str, format_choice: str, format_id, title: str, thumbnail: str = "") -> str:
         def _work(job: Job):
             job.thumbnail = thumbnail
+            job.format_choice = format_choice
+            job.format_id = format_id
             out_template = str(DOWNLOAD_DIR / f"{job.id}.%(ext)s")
+            job.out_template = out_template
 
             def _on_progress(downloaded, total, speed, eta, frag_idx, frag_count):
                 job.downloaded_bytes = downloaded
@@ -224,11 +284,13 @@ def create_app() -> Flask:
                 format_id=format_id,
                 progress_cb=_on_progress,
                 register_process=_register_proc,
+                was_paused_check=lambda: job._was_paused,
             )
             if result.error_category:
-                job.status = JobStatus.ERROR
-                job.error_category = result.error_category
-                job.error_message = result.error_raw
+                if not job._was_paused:
+                    job.status = JobStatus.ERROR
+                    job.error_category = result.error_category
+                    job.error_message = result.error_raw
                 return
             ext = os.path.splitext(result.file_path)[1] if result.file_path else ""
             job.file_path = result.file_path

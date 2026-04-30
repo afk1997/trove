@@ -90,3 +90,25 @@ def test_pause_endpoint_returns_card_html(client):
 def test_pause_endpoint_404_unknown(client):
     res = client.post("/api/job/unknownid12/pause")
     assert res.status_code == 404
+
+
+def test_resume_endpoint_returns_card_html(client):
+    from jobs import Job, JobStatus
+    jm = client.application.extensions["trove.jobs"]
+    j = Job(
+        id="pausedjob1", url="https://example.com/v", title="Test",
+        status=JobStatus.PAUSED,
+        format_choice="video", format_id=None,
+        out_template="/tmp/test.%(ext)s",
+    )
+    with jm._lock:
+        jm._jobs["pausedjob1"] = j
+    res = client.post("/api/job/pausedjob1/resume")
+    assert res.status_code == 200
+    body = res.data.decode()
+    assert body.strip()  # rendered card (specific class checks once template is updated in T11)
+
+
+def test_resume_endpoint_404_unknown(client):
+    res = client.post("/api/job/unknownid12/resume")
+    assert res.status_code == 404
