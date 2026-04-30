@@ -19,18 +19,20 @@
 
   <script nonce="{{ g.csp_nonce }}" src="{{ url_for('static', filename='vendor/htmx.min.js') }}"></script>
   <script nonce="{{ g.csp_nonce }}">
-    // Track active downloads so we can sendBeacon a cancel on tab close.
+    // Track active downloads so we can sendBeacon a pause on tab close.
     window.__troveActiveJobs = new Set();
     window.addEventListener('beforeunload', function () {
       for (var id of window.__troveActiveJobs) {
-        try { navigator.sendBeacon('/api/job/' + id + '/cancel'); } catch (_) {}
+        try { navigator.sendBeacon('/api/job/' + id + '/pause'); } catch (_) {}
       }
     });
     function refreshActiveJobs() {
       var active = new Set();
-      document.querySelectorAll('[data-job-id][data-status="downloading"]').forEach(function (el) {
-        active.add(el.dataset.jobId);
-      });
+      document
+        .querySelectorAll('[data-job-id][data-status="downloading"], [data-job-id][data-status="paused"]')
+        .forEach(function (el) {
+          active.add(el.dataset.jobId);
+        });
       window.__troveActiveJobs = active;
     }
     // Auto-trigger the browser download as soon as a card flips to DONE,
