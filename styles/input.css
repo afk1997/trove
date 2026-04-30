@@ -526,6 +526,65 @@
   .clip-download-again:hover { text-decoration-style: solid; color: var(--orange); }
   .clip-download-again:focus-visible { outline: 2px dashed var(--orange); outline-offset: 2px; }
 
+  /* PAUSED */
+  .clip.is-paused {
+    border-color: var(--teal);
+    border-style: dashed;
+    box-shadow: var(--shadow-stamp);
+    filter: saturate(0.6);
+  }
+  .clip.is-paused .clip-thumb { filter: grayscale(0.3); }
+  .clip.is-paused .clip-progress-fill { opacity: 0.6; }
+  .clip.is-paused .clip-progress {
+    border-top-color: var(--teal);
+  }
+
+  .clip-pause, .clip-cancel {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    background: transparent;
+    color: var(--teal);
+    border: 1.5px solid var(--teal);
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: color 150ms ease-out, border-color 150ms ease-out;
+  }
+  .clip-pause:hover, .clip-cancel:hover {
+    color: var(--orange);
+    border-color: var(--orange);
+  }
+  .clip-pause:focus-visible, .clip-cancel:focus-visible {
+    outline: 2px dashed var(--orange);
+    outline-offset: 2px;
+  }
+
+  .clip-resume {
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    background: var(--orange);
+    color: var(--light);
+    border: 1.5px solid var(--teal);
+    padding: 7px 14px;
+    box-shadow: var(--shadow-stamp);
+    transform: rotate(-1deg);
+    cursor: pointer;
+    transition: box-shadow 150ms ease-out, transform 80ms ease-out;
+  }
+  .clip-resume:hover { box-shadow: 3px 3px 0 var(--teal); }
+  .clip-resume:active {
+    box-shadow: 0 0 0 var(--teal);
+    transform: rotate(-1deg) translate(2px, 2px);
+  }
+  .clip-resume:focus-visible {
+    outline: 2px dashed var(--teal);
+    outline-offset: 2px;
+  }
+
   /* CANCELLED */
   .clip.is-cancelled { opacity: 0.55; border-style: dashed; box-shadow: none; }
   .clip.is-cancelled .clip-title { text-decoration: line-through; text-decoration-color: var(--orange); }
