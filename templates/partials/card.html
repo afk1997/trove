@@ -117,6 +117,22 @@
   </div>
   <div class="clip-action">
     <span class="clip-saving-stamp">Saving<span class="ellipsis">…</span></span>
+    <button
+      type="button"
+      class="clip-pause"
+      hx-post="/api/job/{{ card.id }}/pause"
+      hx-target="closest .clip"
+      hx-swap="outerHTML transition:true"
+      title="Pause download (keeps partial bytes)"
+    >⏸ pause</button>
+    <button
+      type="button"
+      class="clip-cancel"
+      hx-post="/api/job/{{ card.id }}/cancel"
+      hx-target="closest .clip"
+      hx-swap="outerHTML transition:true"
+      title="Cancel download (deletes partial bytes)"
+    >✕</button>
   </div>
   <div class="clip-progress">
     <div class="clip-progress-fill" style="width: {{ card.percent or 0 }}%"></div>
