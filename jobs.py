@@ -13,6 +13,7 @@ from typing import Callable
 class JobStatus(str, enum.Enum):
     QUEUED = "queued"
     DOWNLOADING = "downloading"
+    PAUSED = "paused"
     DONE = "done"
     ERROR = "error"
     CANCELLED = "cancelled"
@@ -40,6 +41,13 @@ class Job:
     # HLS / fragmented downloads expose fragment counts even when total_bytes is unknown.
     fragment_index: int = 0
     fragment_count: int = 0
+    # Resume args — captured at submit time so a paused job can be re-run after restart
+    format_choice: str = "video"
+    format_id: str | None = None
+    out_template: str = ""
+    # Transient flag set by JobManager.pause() before the process is killed,
+    # so runner._cleanup_glob() can be skipped (preserves .part files).
+    _was_paused: bool = False
 
 
 class JobManager:

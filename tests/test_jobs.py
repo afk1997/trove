@@ -94,3 +94,18 @@ def test_ttl_sweep_removes_old_done_jobs(tmp_path):
     assert jm.get(jid) is None
     assert not (tmp_path / "out.bin").exists()
     jm.shutdown()
+
+
+def test_job_status_includes_paused():
+    assert JobStatus.PAUSED.value == "paused"
+
+
+def test_job_dataclass_has_resume_fields():
+    j = Job(id="x", url="https://e.com", title="t")
+    assert hasattr(j, "format_choice")
+    assert hasattr(j, "format_id")
+    assert hasattr(j, "out_template")
+    assert j.format_choice == "video"
+    assert j.format_id is None
+    assert j.out_template == ""
+    assert j._was_paused is False
