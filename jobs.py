@@ -160,6 +160,32 @@ class JobManager:
         self._persist()
         return True
 
+    def pause(self, job_id: str) -> bool:
+        """Pause an active or queued job. Keeps .part files for resume.
+
+        Returns True if the job is now paused (or was already paused).
+        Returns False if the job is unknown or in a terminal state.
+        """
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return False
+            if job.status in {JobStatus.DONE, JobStatus.ERROR, JobStatus.CANCELLED}:
+                return False
+            if job.status == JobStatus.PAUSED:
+                return True  # idempotent
+            proc = job.process
+            job._was_paused = True       # tell runner: skip cleanup
+            job.status = JobStatus.PAUSED
+        # Outside lock: kill the subprocess if any.
+        if proc is not None and hasattr(proc, "kill"):
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        self._persist()
+        return True
+
     def sweep(self) -> int:
         cutoff = time.monotonic() - self.ttl_seconds
         removed = 0

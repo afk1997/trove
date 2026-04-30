@@ -191,3 +191,46 @@ def test_jobmanager_load_keeps_done_and_error(tmp_path):
     assert jm.get("d").status == JobStatus.DONE
     assert jm.get("e").status == JobStatus.ERROR
     jm.shutdown()
+
+
+def test_pause_marks_paused_and_kills_process():
+    jm = JobManager(max_workers=1, ttl_seconds=60)
+    jid = jm.submit(target=lambda j: time.sleep(2), title="t", url="https://x")
+    # Inject a fake process so we can verify it gets killed
+    fake = type("P", (), {"killed": False, "kill": lambda self: setattr(self, "killed", True)})()
+    jm.get(jid).process = fake
+
+    assert jm.pause(jid) is True
+    assert jm.get(jid).status == JobStatus.PAUSED
+    assert jm.get(jid)._was_paused is True
+    assert fake.killed is True
+    jm.shutdown()
+
+
+def test_pause_idempotent_on_already_paused():
+    jm = JobManager(max_workers=1, ttl_seconds=60)
+    jid = jm.submit(target=lambda j: time.sleep(2), title="t", url="https://x")
+    jm.pause(jid)
+    # Second call returns True and stays PAUSED, doesn't crash
+    assert jm.pause(jid) is True
+    assert jm.get(jid).status == JobStatus.PAUSED
+    jm.shutdown()
+
+
+def test_pause_returns_false_for_unknown_id():
+    jm = JobManager(max_workers=1, ttl_seconds=60)
+    assert jm.pause("nonexistent") is False
+    jm.shutdown()
+
+
+def test_pause_noop_on_terminal_states():
+    """Pausing a DONE/ERROR/CANCELLED job is a no-op (returns False)."""
+    jm = JobManager(max_workers=1, ttl_seconds=60)
+    jid = jm.submit(target=lambda j: None, title="t", url="https://x")
+    for _ in range(50):
+        if jm.get(jid).status == JobStatus.DONE:
+            break
+        time.sleep(0.05)
+    assert jm.pause(jid) is False
+    assert jm.get(jid).status == JobStatus.DONE
+    jm.shutdown()
