@@ -234,3 +234,51 @@ def test_pause_noop_on_terminal_states():
     assert jm.pause(jid) is False
     assert jm.get(jid).status == JobStatus.DONE
     jm.shutdown()
+
+
+def test_resume_re_runs_target_and_clears_paused_flag():
+    jm = JobManager(max_workers=1, ttl_seconds=60)
+    runs = []
+
+    def work(job: Job):
+        runs.append(job.id)
+
+    jid = jm.submit(target=work, title="t", url="https://x")
+    # Wait for first run
+    for _ in range(50):
+        if jm.get(jid).status == JobStatus.DONE:
+            break
+        time.sleep(0.05)
+    # Force into PAUSED for the test
+    with jm._lock:
+        jm._jobs[jid].status = JobStatus.PAUSED
+        jm._jobs[jid]._was_paused = True
+
+    assert jm.resume(jid, target=work) is True
+    # Wait for second run
+    for _ in range(50):
+        if jm.get(jid).status == JobStatus.DONE:
+            break
+        time.sleep(0.05)
+    assert len(runs) == 2
+    assert jm.get(jid)._was_paused is False
+    jm.shutdown()
+
+
+def test_resume_returns_false_for_unknown_id():
+    jm = JobManager(max_workers=1, ttl_seconds=60)
+    assert jm.resume("nope", target=lambda j: None) is False
+    jm.shutdown()
+
+
+def test_resume_no_op_on_already_downloading():
+    jm = JobManager(max_workers=1, ttl_seconds=60)
+    jid = jm.submit(target=lambda j: time.sleep(2), title="t", url="https://x")
+    # While DOWNLOADING, resume should return True and not double-submit
+    runs = []
+    # Give the job time to reach DOWNLOADING
+    time.sleep(0.2)
+    assert jm.resume(jid, target=lambda j: runs.append(1)) is True
+    time.sleep(0.1)
+    assert len(runs) == 0  # the resume target should not have run
+    jm.shutdown()

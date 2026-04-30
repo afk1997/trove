@@ -186,6 +186,50 @@ class JobManager:
         self._persist()
         return True
 
+    def resume(self, job_id: str, *, target: Callable[[Job], None]) -> bool:
+        """Resume a paused job. Re-submits the work target to the executor.
+
+        The caller (app.py) is responsible for constructing the target closure
+        from the persisted Job.format_choice / format_id / out_template /
+        url / title etc. — this method just re-runs whatever target the
+        caller supplies.
+
+        Returns True if the job is now downloading.
+        Returns False if the job is unknown or in a terminal state.
+        """
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return False
+            if job.status in {JobStatus.DONE, JobStatus.ERROR, JobStatus.CANCELLED}:
+                return False
+            if job.status == JobStatus.DOWNLOADING:
+                return True  # idempotent — already running
+            job.status = JobStatus.DOWNLOADING
+            job._was_paused = False
+            self._inflight += 1
+        self._persist()
+
+        def _run():
+            try:
+                target(job)
+                with self._lock:
+                    if job.status not in {JobStatus.ERROR, JobStatus.CANCELLED, JobStatus.PAUSED}:
+                        job.status = JobStatus.DONE
+                self._persist()
+            except Exception as e:
+                with self._lock:
+                    job.status = JobStatus.ERROR
+                    job.error_category = job.error_category or "unknown"
+                    job.error_message = job.error_message or str(e)
+                self._persist()
+            finally:
+                with self._lock:
+                    self._inflight -= 1
+
+        self._executor.submit(_run)
+        return True
+
     def sweep(self) -> int:
         cutoff = time.monotonic() - self.ttl_seconds
         removed = 0
