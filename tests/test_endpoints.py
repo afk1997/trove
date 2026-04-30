@@ -112,3 +112,26 @@ def test_resume_endpoint_returns_card_html(client):
 def test_resume_endpoint_404_unknown(client):
     res = client.post("/api/job/unknownid12/resume")
     assert res.status_code == 404
+
+
+def test_index_renders_persisted_paused_jobs(client):
+    """A persisted PAUSED job should appear in the queue on GET /."""
+    from jobs import Job, JobStatus
+    jm = client.application.extensions["trove.jobs"]
+    j = Job(
+        id="persisted1", url="https://example.com/v", title="Persisted Title",
+        status=JobStatus.PAUSED,
+        format_choice="video", format_id=None,
+        out_template="/tmp/persisted.%(ext)s",
+        downloaded_bytes=5 * 1048576, total_bytes=10 * 1048576,
+    )
+    with jm._lock:
+        jm._jobs["persisted1"] = j
+
+    res = client.get("/")
+    assert res.status_code == 200
+    body = res.data.decode()
+    assert 'data-job-id="persisted1"' in body
+    assert "is-paused" in body
+    assert "Persisted Title" in body
+    assert "▶</span> resume" in body  # decorative glyph wrapped per a11y

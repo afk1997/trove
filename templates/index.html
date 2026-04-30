@@ -64,12 +64,16 @@
 </div>
 
 <div class="queue-stack">
+  {% if not initial_cards %}
   <div id="empty-hint" class="empty-hint">
     <div class="arrow-up" aria-hidden="true">↑</div>
     <p class="line-1">your clippings will appear here.</p>
     <p class="line-2">paste a link above to begin</p>
   </div>
-  <div id="queue" aria-live="polite"></div>
+  {% endif %}
+  <div id="queue" aria-live="polite">
+    {% for card in initial_cards %}{% include "partials/card.html" %}{% endfor %}
+  </div>
 </div>
 
 <script nonce="{{ g.csp_nonce }}">

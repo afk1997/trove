@@ -282,3 +282,69 @@ def test_resume_no_op_on_already_downloading():
     time.sleep(0.1)
     assert len(runs) == 0  # the resume target should not have run
     jm.shutdown()
+
+
+def test_cancel_from_paused_removes_partial_files(tmp_path):
+    """Cancel on a non-terminal job (e.g. PAUSED) must remove .part and other
+    output-template artifacts left behind by the killed yt-dlp process.
+    """
+    jm = JobManager(max_workers=1, ttl_seconds=60)
+    # Two artifacts a paused yt-dlp could leave behind
+    part_file = tmp_path / "abc.mp4.part"
+    part_file.write_bytes(b"partial")
+    webm_file = tmp_path / "abc.webm"
+    webm_file.write_bytes(b"alt")
+    out_template = str(tmp_path / "abc.%(ext)s")
+
+    jid = jm.submit(target=lambda j: time.sleep(2), title="t", url="https://x")
+    # Simulate a paused job: status PAUSED + out_template recorded.
+    with jm._lock:
+        j = jm._jobs[jid]
+        j.status = JobStatus.PAUSED
+        j._was_paused = True
+        j.out_template = out_template
+
+    assert jm.cancel(jid) is True
+    assert jm.get(jid).status == JobStatus.CANCELLED
+    assert not part_file.exists(), "cancel should delete .part files"
+    assert not webm_file.exists(), "cancel should delete the alt-format leftover"
+    jm.shutdown()
+
+
+def test_runner_success_during_pause_window_promotes_to_done(tmp_path):
+    """When pause() fires after target() wrote file_path but before _run
+    re-acquires the lock, the post-target promotion should still mark the
+    job DONE. Without this guard the job would be stuck in PAUSED.
+    """
+    jm = JobManager(max_workers=1, ttl_seconds=60)
+
+    def work(job: Job):
+        # Simulate yt-dlp completing successfully — file_path is set.
+        out = tmp_path / "out.mp4"
+        out.write_bytes(b"ok")
+        job.file_path = str(out)
+        # Now simulate pause() racing in: status flips to PAUSED before
+        # the runner thread re-acquires the lock for the terminal status set.
+        with jm._lock:
+            job.status = JobStatus.PAUSED
+            job._was_paused = True
+
+    jid = jm.submit(target=work, title="t", url="https://x")
+    for _ in range(100):
+        if jm.get(jid).status in {JobStatus.DONE, JobStatus.PAUSED}:
+            break
+        time.sleep(0.02)
+
+    j = jm.get(jid)
+    assert j.status == JobStatus.DONE, f"expected DONE, got {j.status}"
+    assert j._was_paused is False
+    jm.shutdown()
+
+
+def test_snapshot_jobs_returns_insertion_ordered_list():
+    jm = JobManager(max_workers=2, ttl_seconds=60)
+    j1 = jm.submit(target=lambda j: None, title="a", url="https://1")
+    j2 = jm.submit(target=lambda j: None, title="b", url="https://2")
+    snap = jm.snapshot_jobs()
+    assert [j.id for j in snap] == [j1, j2]
+    jm.shutdown()

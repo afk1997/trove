@@ -62,7 +62,15 @@ def create_app() -> Flask:
 
     @app.get("/")
     def index():
-        return render_template("index.html")
+        # Rehydrate persisted jobs (paused/done/error) into the queue so the
+        # user can resume / re-download / inspect them after a restart.
+        # CANCELLED jobs are already dropped at load time.
+        initial_cards = []
+        for j in job_manager.snapshot_jobs():
+            if j.status == JobStatus.CANCELLED:
+                continue
+            initial_cards.append(_card_view(j))
+        return render_template("index.html", initial_cards=initial_cards)
 
     # --- JSON API (stable, scriptable) -------------------------------------
 

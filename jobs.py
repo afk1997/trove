@@ -113,7 +113,11 @@ class JobManager:
                 self._persist()
                 target(job)
                 with self._lock:
-                    if job.status not in {JobStatus.ERROR, JobStatus.CANCELLED, JobStatus.PAUSED}:
+                    if job.status == JobStatus.PAUSED and job.file_path:
+                        # Pause raced runner success — runner already wrote a real file.
+                        job.status = JobStatus.DONE
+                        job._was_paused = False
+                    elif job.status not in {JobStatus.ERROR, JobStatus.CANCELLED, JobStatus.PAUSED}:
                         job.status = JobStatus.DONE
                 self._persist()
             except Exception as e:
@@ -136,12 +140,23 @@ class JobManager:
                 j.last_accessed = time.monotonic()
             return j
 
+    def snapshot_jobs(self) -> list[Job]:
+        """Return a list copy of the current jobs in insertion order.
+
+        Used for rendering persisted jobs on page reload — the caller filters
+        by status. Returns the live Job objects (not copies); the lock is
+        released before the caller iterates.
+        """
+        with self._lock:
+            return list(self._jobs.values())
+
     def cancel(self, job_id: str) -> bool:
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None:
                 return False
             proc = job.process
+            out_template = job.out_template
             if job.status in {JobStatus.DONE, JobStatus.ERROR, JobStatus.CANCELLED}:
                 if job.file_path and os.path.exists(job.file_path):
                     try:
@@ -155,6 +170,12 @@ class JobManager:
         if proc is not None and hasattr(proc, "kill"):
             try:
                 proc.kill()
+            except Exception:
+                pass
+        if out_template:
+            try:
+                from runner import _cleanup_glob
+                _cleanup_glob(out_template)
             except Exception:
                 pass
         self._persist()
@@ -214,7 +235,11 @@ class JobManager:
             try:
                 target(job)
                 with self._lock:
-                    if job.status not in {JobStatus.ERROR, JobStatus.CANCELLED, JobStatus.PAUSED}:
+                    if job.status == JobStatus.PAUSED and job.file_path:
+                        # Pause raced runner success — runner already wrote a real file.
+                        job.status = JobStatus.DONE
+                        job._was_paused = False
+                    elif job.status not in {JobStatus.ERROR, JobStatus.CANCELLED, JobStatus.PAUSED}:
                         job.status = JobStatus.DONE
                 self._persist()
             except Exception as e:
