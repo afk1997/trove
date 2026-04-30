@@ -124,15 +124,16 @@
       hx-target="closest .clip"
       hx-swap="outerHTML transition:true"
       title="Pause download (keeps partial bytes)"
-    >⏸ pause</button>
+    ><span aria-hidden="true">⏸</span> pause</button>
     <button
       type="button"
       class="clip-cancel"
+      aria-label="Cancel download"
       hx-post="/api/job/{{ card.id }}/cancel"
       hx-target="closest .clip"
       hx-swap="outerHTML transition:true"
       title="Cancel download (deletes partial bytes)"
-    >✕</button>
+    ><span aria-hidden="true">✕</span></button>
   </div>
   <div class="clip-progress">
     <div class="clip-progress-fill" style="width: {{ card.percent or 0 }}%"></div>
@@ -188,15 +189,16 @@
       hx-target="closest .clip"
       hx-swap="outerHTML transition:true"
       title="Resume download"
-    >▶ resume</button>
+    ><span aria-hidden="true">▶</span> resume</button>
     <button
       type="button"
       class="clip-cancel"
+      aria-label="Cancel download"
       hx-post="/api/job/{{ card.id }}/cancel"
       hx-target="closest .clip"
       hx-swap="outerHTML transition:true"
       title="Cancel download (deletes partial bytes)"
-    >✕</button>
+    ><span aria-hidden="true">✕</span></button>
   </div>
   <div class="clip-progress">
     <div class="clip-progress-fill" style="width: {{ card.percent or 0 }}%"></div>
