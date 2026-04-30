@@ -42,7 +42,11 @@ def create_app() -> Flask:
     attach_security_headers(app)
 
     rate_limiter = RateLimiter(rate=RATE_LIMIT_PER_MIN, per_seconds=60)
-    job_manager = JobManager(max_workers=MAX_WORKERS, ttl_seconds=JOB_TTL)
+    job_manager = JobManager(
+        max_workers=MAX_WORKERS,
+        ttl_seconds=JOB_TTL,
+        store_path=DOWNLOAD_DIR / "jobs.json",
+    )
     job_manager.start_sweeper(interval_seconds=300)
     app.extensions["trove.jobs"] = job_manager
     app.extensions["trove.rate_limiter"] = rate_limiter
