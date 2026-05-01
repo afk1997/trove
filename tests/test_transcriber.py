@@ -45,3 +45,104 @@ def test_extract_audio_raises_on_ffmpeg_failure(monkeypatch, tmp_path):
 
     with pytest.raises(RuntimeError, match="ffmpeg"):
         transcriber.extract_audio(str(tmp_path / "in.mp4"), str(tmp_path / "out.wav"))
+
+
+def test_run_transcribe_returns_structured_result(monkeypatch, tmp_path):
+    """run_transcribe wraps pywhispercpp Model and returns a TranscriptResult."""
+    fake_segments = [
+        type("S", (), {
+            "text": "hello world",
+            "t0": 0.0, "t1": 1.0,
+            "words": [
+                type("W", (), {"text": "hello", "t0": 0.0, "t1": 0.5})(),
+                type("W", (), {"text": "world", "t0": 0.5, "t1": 1.0})(),
+            ],
+        })()
+    ]
+
+    class FakeModel:
+        def __init__(self, model_path, **kw):
+            self.params = type("P", (), {})()
+        def transcribe(self, audio, **kw):
+            return fake_segments
+        def detected_language(self):
+            return "en"
+
+    monkeypatch.setattr(transcriber, "_load_pywhispercpp_model", lambda path: FakeModel(path))
+
+    audio = tmp_path / "x.wav"
+    audio.write_bytes(b"WAV")
+
+    progress_events = []
+    res = transcriber.run_transcribe(
+        audio_path=str(audio),
+        model_path=str(tmp_path / "ggml-base.bin"),
+        progress_cb=lambda pct: progress_events.append(pct),
+        cancel_check=lambda: False,
+    )
+
+    assert isinstance(res, transcriber.TranscriptResult)
+    assert res.language == "en"
+    assert res.error is None
+    assert len(res.words) == 2
+    assert res.words[0]["w"] == "hello"
+    assert res.words[0]["start"] == 0.0
+    assert res.segments[0]["text"] == "hello world"
+    # Progress should have been called at least once with 100%
+    assert any(p == 100 for p in progress_events)
+
+
+def test_run_transcribe_cancellable(monkeypatch, tmp_path):
+    """If cancel_check returns True before transcription, run_transcribe returns
+    a TranscriptResult with error='cancelled' and no segments.
+    """
+    class FakeModel:
+        def __init__(self, *a, **kw): pass
+        def transcribe(self, *a, **kw): return []
+        def detected_language(self): return ""
+
+    monkeypatch.setattr(transcriber, "_load_pywhispercpp_model", lambda path: FakeModel())
+
+    audio = tmp_path / "x.wav"
+    audio.write_bytes(b"WAV")
+
+    res = transcriber.run_transcribe(
+        audio_path=str(audio),
+        model_path=str(tmp_path / "m.bin"),
+        progress_cb=lambda pct: None,
+        cancel_check=lambda: True,  # cancel before run
+    )
+    assert res.error == "cancelled"
+
+
+def test_write_artifacts_produces_all_four_files(tmp_path):
+    res = transcriber.TranscriptResult(
+        language="en",
+        duration=2.0,
+        segments=[
+            {"start": 0.0, "end": 1.0, "text": "hello world",
+             "words": [{"w": "hello", "start": 0.0, "end": 0.5},
+                       {"w": "world", "start": 0.5, "end": 1.0}]},
+            {"start": 1.0, "end": 2.0, "text": "second segment",
+             "words": [{"w": "second", "start": 1.0, "end": 1.5},
+                       {"w": "segment", "start": 1.5, "end": 2.0}]},
+        ],
+        words=[],
+        error=None,
+    )
+    transcriber.write_artifacts(res, str(tmp_path / "abc"))
+
+    for ext in (".txt", ".srt", ".vtt", ".words.json"):
+        assert (tmp_path / f"abc{ext}").exists()
+
+    txt = (tmp_path / "abc.txt").read_text()
+    assert "hello world" in txt
+    assert "second segment" in txt
+
+    srt = (tmp_path / "abc.srt").read_text()
+    assert "1\n00:00:00,000 --> 00:00:01,000" in srt
+    assert "2\n00:00:01,000 --> 00:00:02,000" in srt
+
+    vtt = (tmp_path / "abc.vtt").read_text()
+    assert vtt.startswith("WEBVTT")
+    assert "00:00:00.000 --> 00:00:01.000" in vtt
