@@ -1,0 +1,23 @@
+{% if state.downloading %}
+<div class="setup-download">
+  <p>downloading {{ state.model_name }}…</p>
+  <div class="setup-download-bar">
+    <div class="setup-download-fill"
+         style="width: {{ (state.received / state.total * 100) if state.total else 0 }}%"></div>
+  </div>
+  <p>
+    {{ "%.0f" | format(state.received / 1048576) }} MB
+    / {{ "%.0f" | format(state.total / 1048576) }} MB
+  </p>
+</div>
+{% elif state.done %}
+<div class="setup-download is-done">
+  <p>✓ {{ state.model_name }} installed</p>
+</div>
+{% elif state.error %}
+<div class="setup-download is-error">
+  <p>couldn't reach huggingface.co.</p>
+  <p>trove needs to download a transcription model just once — after that, everything runs offline forever. check your connection and try again.</p>
+  <p class="setup-download-err-detail">{{ state.error }}</p>
+</div>
+{% endif %}

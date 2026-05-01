@@ -14,6 +14,9 @@ from safety import (
 )
 from runner import run_info, run_download, classify_error
 from jobs import JobManager, Job, JobStatus
+import models_store
+import machine
+from threading import Thread, Lock
 
 
 DOWNLOAD_DIR = Path(__file__).parent / "downloads"
@@ -276,6 +279,92 @@ def create_app() -> Flask:
             return "", 404
         job = job_manager.get(job_id)
         return render_template("partials/card.html", card=_card_view(job))
+
+    # --- Transcribe setup -------------------------------------------------
+
+    # In-process state for the model download. One download at a time.
+    transcribe_setup_state = {
+        "downloading": False,
+        "model_name": None,
+        "received": 0,
+        "total": 0,
+        "error": None,
+        "done": False,
+    }
+    transcribe_setup_lock = Lock()
+
+    def _setup_state_snapshot():
+        with transcribe_setup_lock:
+            return dict(transcribe_setup_state)
+
+    @app.get("/transcribe/setup")
+    def transcribe_setup():
+        active = models_store.get_active()
+        info = machine.probe()
+        models_meta = []
+        for name, meta in models_store.KNOWN_MODELS.items():
+            models_meta.append({
+                "name": name,
+                "label": meta["label"],
+                "size_bytes": meta["size_bytes"],
+                "hf_url": meta["hf_url"],
+                "sha256": meta["sha256"],
+                "stars": meta["stars"],
+                "multilingual": meta["multilingual"],
+                "rtf": machine.speed_estimate(name),
+                "is_active": name == active,
+                "is_installed": name in models_store.list_installed(),
+            })
+        return render_template(
+            "transcribe_setup.html",
+            machine_info=info,
+            models=models_meta,
+            active=active,
+            settings_mode=active is not None,
+            setup_state=_setup_state_snapshot(),
+        )
+
+    @app.post("/api/transcribe/setup-model")
+    @token_required
+    def api_transcribe_setup_model():
+        name = request.form.get("name") or (request.get_json(silent=True) or {}).get("name", "")
+        if name not in models_store.KNOWN_MODELS:
+            return jsonify({"error": "unknown_model"}), 400
+        with transcribe_setup_lock:
+            if transcribe_setup_state["downloading"]:
+                return jsonify({"error": "busy"}), 409
+            transcribe_setup_state.update({
+                "downloading": True, "model_name": name,
+                "received": 0, "total": models_store.KNOWN_MODELS[name]["size_bytes"],
+                "error": None, "done": False,
+            })
+
+        def _progress(rec, total):
+            with transcribe_setup_lock:
+                transcribe_setup_state["received"] = rec
+                transcribe_setup_state["total"] = total
+
+        def _worker():
+            try:
+                models_store.download(name, progress_cb=_progress, verify=True)
+                models_store.set_active(name)
+                with transcribe_setup_lock:
+                    transcribe_setup_state["downloading"] = False
+                    transcribe_setup_state["done"] = True
+            except Exception as e:
+                with transcribe_setup_lock:
+                    transcribe_setup_state["downloading"] = False
+                    transcribe_setup_state["error"] = type(e).__name__ + ": " + str(e)
+
+        Thread(target=_worker, daemon=True, name="trove-model-download").start()
+        return ("", 202)
+
+    @app.get("/api/transcribe/setup-progress")
+    def api_transcribe_setup_progress():
+        return render_template(
+            "partials/transcribe_setup_progress.html",
+            state=_setup_state_snapshot(),
+        )
 
     # --- helpers -----------------------------------------------------------
 

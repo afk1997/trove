@@ -1,0 +1,25 @@
+<article class="model-card{% if m.is_active %} is-active{% endif %}">
+  <header class="model-card-head">
+    <h3>{{ m.label }}</h3>
+    <span class="model-card-file">{{ m.name }}</span>
+  </header>
+  <p class="model-card-meta">
+    {{ "%.0f" | format(m.size_bytes / 1048576) }} MB
+    · ~{{ "%.1f" | format(m.rtf) }}× realtime
+    · {{ "★" * m.stars }}{{ "☆" * (5 - m.stars) }}
+  </p>
+  <p class="model-card-source">
+    source ↗ {{ m.hf_url }}
+  </p>
+  {% if m.is_active %}
+    <span class="model-card-stamp">✓ ACTIVE</span>
+  {% else %}
+    <form
+      hx-post="/api/transcribe/setup-model"
+      hx-swap="none"
+    >
+      <input type="hidden" name="name" value="{{ m.name }}">
+      <button type="submit" class="model-card-pick">pick this model ↗</button>
+    </form>
+  {% endif %}
+</article>
