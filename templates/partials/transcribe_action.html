@@ -1,0 +1,34 @@
+{% set state = tj.status.value if tj else "idle" %}
+<span class="clip-transcribe-row" data-transcribe-state="{{ state }}">
+  {% if state == "running" or state == "queued" %}
+    <span hx-get="/api/transcribe/{{ tj.id }}/status" hx-trigger="every 2s" hx-swap="outerHTML">
+      ▸ transcribing… {{ tj.progress_pct }}%
+      <button type="button"
+              class="clip-transcribe-cancel"
+              hx-post="/api/transcribe/{{ tj.id }}/cancel"
+              hx-target="closest .clip-transcribe-row"
+              hx-swap="outerHTML">⏵ cancel</button>
+    </span>
+  {% elif state == "done" %}
+    <a class="clip-transcribe-view" href="/transcript/{{ tj.id }}" target="_blank">▸ view transcript ↗</a>
+  {% elif state == "error" %}
+    <span class="clip-transcribe-err">▸ transcribe failed</span>
+    <button type="button"
+            class="clip-transcribe-retry"
+            hx-post="/api/transcribe/{{ parent.id }}/start"
+            hx-target="closest .clip-transcribe-row"
+            hx-swap="outerHTML">retry</button>
+  {% elif state == "cancelled" %}
+    <button type="button"
+            class="clip-transcribe-restart"
+            hx-post="/api/transcribe/{{ parent.id }}/start"
+            hx-target="closest .clip-transcribe-row"
+            hx-swap="outerHTML">▸ transcribe</button>
+  {% else %}
+    <button type="button"
+            class="clip-transcribe-start"
+            hx-post="/api/transcribe/{{ parent.id }}/start"
+            hx-target="closest .clip-transcribe-row"
+            hx-swap="outerHTML">▸ transcribe</button>
+  {% endif %}
+</span>

@@ -1,0 +1,12 @@
+<div class="modal-overlay" id="consent-modal" role="dialog" aria-modal="true" aria-labelledby="consent-title">
+  <div class="modal">
+    <h2 id="consent-title">about local transcription</h2>
+    <p>trove transcribes audio and video using whisper.cpp, running entirely on your machine. your media never leaves your computer.</p>
+    <p>the first time you transcribe, trove downloads a small AI model (~140 MB by default) from huggingface. this happens once — after that, transcription works without any internet connection.</p>
+    <p>you'll be able to pick the model size, see your machine's capability, and review what's downloaded before it starts.</p>
+    <div class="modal-actions">
+      <button type="button" class="modal-secondary" hx-on:click="document.getElementById('consent-modal').remove()">not now</button>
+      <a href="/transcribe/setup" class="modal-primary">set it up ↗</a>
+    </div>
+  </div>
+</div>

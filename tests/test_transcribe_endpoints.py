@@ -151,3 +151,37 @@ def test_setup_settings_mode_shows_active_marker(client, tmp_path):
     assert "pick this model" in body or "switch to this" in body
     # Header reads settings, not setup
     assert "settings" in body.lower()
+
+
+def test_transcribe_start_no_model_returns_consent_modal(client):
+    """If no model is installed, /api/transcribe/<parent>/start renders the consent modal."""
+    res = client.post("/api/transcribe/abc1/start")
+    assert res.status_code == 200
+    body = res.data.decode().lower()
+    assert "consent" in body or "transcribe" in body or "huggingface" in body or "trove" in body
+
+
+def test_transcribe_start_unknown_parent_404(client, tmp_path):
+    """Even with model installed, an unknown parent job → 404."""
+    import models_store
+    (tmp_path / "models").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "models" / "ggml-base.bin").write_bytes(b"x")
+    models_store.set_active("ggml-base.bin")
+
+    res = client.post("/api/transcribe/unknownjob/start")
+    assert res.status_code == 404
+
+
+def test_transcribe_status_unknown_returns_404(client):
+    res = client.get("/api/transcribe/unknown/status")
+    assert res.status_code == 404
+
+
+def test_transcribe_cancel_unknown_returns_404(client):
+    res = client.post("/api/transcribe/unknown/cancel")
+    assert res.status_code == 404
+
+
+def test_transcribe_dismiss_unknown_returns_404(client):
+    res = client.post("/api/transcribe/unknown/dismiss")
+    assert res.status_code == 404

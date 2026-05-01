@@ -17,6 +17,8 @@ from jobs import JobManager, Job, JobStatus
 import models_store
 import machine
 from threading import Thread, Lock
+import transcribe_jobs
+import transcriber
 
 
 DOWNLOAD_DIR = Path(__file__).parent / "downloads"
@@ -53,6 +55,12 @@ def create_app() -> Flask:
     job_manager.start_sweeper(interval_seconds=300)
     app.extensions["trove.jobs"] = job_manager
     app.extensions["trove.rate_limiter"] = rate_limiter
+
+    transcribe_manager = transcribe_jobs.TranscribeJobManager(
+        max_workers=1,
+        store_path=DOWNLOAD_DIR / "transcribe_jobs.json",
+    )
+    app.extensions["trove.transcribe"] = transcribe_manager
 
     @app.before_request
     def _rate_limit():
@@ -375,6 +383,93 @@ def create_app() -> Flask:
             "partials/transcribe_setup_progress.html",
             state=_setup_state_snapshot(),
         )
+
+    # --- Transcribe lifecycle --------------------------------------------
+
+    @app.post("/api/transcribe/<parent_job_id>/start")
+    @token_required
+    def api_transcribe_start(parent_job_id):
+        # Need an active model installed
+        model_path = models_store.get_active_path()
+        if model_path is None:
+            # First-time consent modal — caller swaps it into the page
+            return render_template("partials/transcribe_consent.html"), 200
+
+        parent = job_manager.get(parent_job_id)
+        if parent is None or parent.status != JobStatus.DONE or not parent.file_path:
+            return jsonify({"error": "parent_not_done"}), 404
+
+        media_path = parent.file_path
+        base_no_ext = os.path.splitext(media_path)[0]  # downloads/<id>
+        wav_path = base_no_ext + ".wav"
+
+        def _work(tj, *, model_path):
+            try:
+                # 1. Extract audio
+                transcriber.extract_audio(media_path, wav_path)
+                if tj._cancel_flag: return
+                transcribe_manager.update_progress(tj.id, 5)
+
+                # 2. Transcribe
+                result = transcriber.run_transcribe(
+                    audio_path=wav_path,
+                    model_path=model_path,
+                    progress_cb=lambda pct: transcribe_manager.update_progress(tj.id, pct),
+                    cancel_check=lambda: tj._cancel_flag,
+                )
+                if result.error == "cancelled" or tj._cancel_flag:
+                    return
+                if result.error:
+                    tj.status = transcribe_jobs.TranscribeStatus.ERROR
+                    tj.error_category = "transcribe_error"
+                    tj.error_message = result.error
+                    return
+
+                # 3. Write artifacts
+                transcriber.write_artifacts(result, base_no_ext)
+                tj.duration_seconds = result.duration
+                tj.language_detected = result.language
+                # 4. Clean up the .wav
+                try: os.remove(wav_path)
+                except OSError: pass
+            finally:
+                pass  # final state set by TranscribeJobManager._run
+
+        tjid = transcribe_manager.submit(
+            parent_job_id=parent_job_id,
+            model_path=str(model_path),
+            target=_work,
+        )
+        tj = transcribe_manager.get(tjid)
+        return render_template("partials/transcribe_action.html", tj=tj, parent=parent)
+
+    @app.get("/api/transcribe/<transcribe_id>/status")
+    @token_required
+    def api_transcribe_status(transcribe_id):
+        tj = transcribe_manager.get(transcribe_id)
+        if tj is None:
+            return "", 404
+        # Need parent for context (id, etc.)
+        parent = job_manager.get(tj.parent_job_id)
+        return render_template("partials/transcribe_action.html", tj=tj, parent=parent)
+
+    @app.post("/api/transcribe/<transcribe_id>/cancel")
+    @token_required
+    def api_transcribe_cancel(transcribe_id):
+        tj = transcribe_manager.get(transcribe_id)
+        if tj is None:
+            return "", 404
+        transcribe_manager.cancel(transcribe_id)
+        parent = job_manager.get(tj.parent_job_id)
+        return render_template("partials/transcribe_action.html", tj=tj, parent=parent)
+
+    @app.post("/api/transcribe/<transcribe_id>/dismiss")
+    @token_required
+    def api_transcribe_dismiss(transcribe_id):
+        ok = transcribe_manager.dismiss(transcribe_id)
+        if not ok:
+            return "", 404
+        return "", 200
 
     # --- helpers -----------------------------------------------------------
 
