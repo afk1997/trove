@@ -185,3 +185,17 @@ def test_transcribe_cancel_unknown_returns_404(client):
 def test_transcribe_dismiss_unknown_returns_404(client):
     res = client.post("/api/transcribe/unknown/dismiss")
     assert res.status_code == 404
+
+
+def test_done_card_includes_transcribe_action(client):
+    """A DONE job's status-card response includes the in-card transcribe row."""
+    from jobs import Job, JobStatus
+    jm = client.application.extensions["trove.jobs"]
+    with jm._lock:
+        jm._jobs["donejob9"] = Job(
+            id="donejob9", url="https://e.com", title="Done Already",
+            status=JobStatus.DONE, file_path="/tmp/x.mp4", filename="x.mp4",
+        )
+    body = client.get("/api/status-card/donejob9").data.decode()
+    assert "clip-transcribe-row" in body
+    assert "▸ transcribe" in body

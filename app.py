@@ -521,7 +521,7 @@ def create_app() -> Flask:
             percent = min(100, int(job.downloaded_bytes / job.total_bytes * 100))
         elif job.fragment_count > 0 and job.fragment_index > 0:
             percent = min(100, int(job.fragment_index / job.fragment_count * 100))
-        return {
+        view = {
             "kind": job.status.value,
             "id": job.id,
             "title": job.title or "Untitled",
@@ -537,6 +537,15 @@ def create_app() -> Flask:
             "fragment_count": job.fragment_count,
             "percent": percent,
         }
+        # Inject transcribe row HTML for DONE cards
+        if job.status == JobStatus.DONE:
+            tj = transcribe_manager.get_by_parent(job.id)
+            view["transcribe_partial"] = render_template(
+                "partials/transcribe_action.html",
+                tj=tj,
+                parent=job,
+            )
+        return view
 
     return app
 

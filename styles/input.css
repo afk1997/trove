@@ -820,6 +820,54 @@
   .modal-primary:hover { box-shadow: 3px 3px 0 var(--teal); }
   .modal-primary:active { transform: rotate(-1deg) translate(2px, 2px); box-shadow: 0 0 0 var(--teal); }
 
+  /* === IN-CARD TRANSCRIBE ROW ====== */
+
+  .clip-transcribe-row {
+    display: inline-flex; align-items: center; gap: 10px;
+    margin-top: 6px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--teal);
+  }
+
+  .clip-transcribe-start, .clip-transcribe-restart, .clip-transcribe-retry,
+  .clip-transcribe-cancel {
+    background: transparent;
+    border: none;
+    color: var(--teal);
+    cursor: pointer;
+    padding: 2px 0;
+    font-family: inherit; font-size: inherit;
+    letter-spacing: inherit; text-transform: inherit;
+    text-decoration: underline;
+    text-decoration-style: dashed;
+    text-underline-offset: 3px;
+    transition: color 150ms ease-out;
+  }
+  .clip-transcribe-start:hover, .clip-transcribe-restart:hover,
+  .clip-transcribe-retry:hover { color: var(--orange); }
+  .clip-transcribe-cancel { color: var(--orange); margin-left: 8px; }
+  .clip-transcribe-cancel:hover { color: var(--teal); }
+
+  .clip-transcribe-view {
+    color: var(--forest);
+    text-decoration: underline;
+    text-decoration-style: dashed;
+    text-underline-offset: 3px;
+  }
+  .clip-transcribe-view:hover { color: var(--orange); }
+
+  .clip-transcribe-err {
+    color: var(--orange);
+    font-style: italic;
+  }
+
+  [data-transcribe-state="running"] {
+    color: var(--orange);
+  }
+
 }
 
 /* ============================================================

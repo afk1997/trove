@@ -162,6 +162,17 @@
       download="{{ card.filename or '' }}"
       class="clip-download-again"
     >↓ download again</a>
+    {% if card.transcribe_partial %}
+      {{ card.transcribe_partial | safe }}
+    {% else %}
+      <span class="clip-transcribe-row" data-transcribe-state="idle">
+        <button type="button"
+                class="clip-transcribe-start"
+                hx-post="/api/transcribe/{{ card.id }}/start"
+                hx-target="closest .clip-transcribe-row"
+                hx-swap="outerHTML">▸ transcribe</button>
+      </span>
+    {% endif %}
   </div>
   <div class="clip-action">
     <span class="clip-saved-stamp">✓ saved</span>
