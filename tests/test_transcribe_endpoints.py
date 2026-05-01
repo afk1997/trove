@@ -137,3 +137,17 @@ def test_setup_model_progress_advances(client, monkeypatch, tmp_path):
     # Expected: error (sha256 mismatch since payload is fake) — that's OK, we're
     # testing that the polling endpoint returns something terminal.
     assert "couldn't reach" in final or "installed" in final
+
+
+def test_setup_settings_mode_shows_active_marker(client, tmp_path):
+    import models_store
+    (tmp_path / "models").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "models" / "ggml-base.bin").write_bytes(b"x")
+    models_store.set_active("ggml-base.bin")
+
+    body = client.get("/transcribe/setup").data.decode()
+    assert "✓ ACTIVE" in body
+    # Other models render a "switch to this" or "pick this" button (since they're not installed)
+    assert "pick this model" in body or "switch to this" in body
+    # Header reads settings, not setup
+    assert "settings" in body.lower()
