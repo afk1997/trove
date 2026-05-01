@@ -199,3 +199,45 @@ def test_done_card_includes_transcribe_action(client):
     body = client.get("/api/status-card/donejob9").data.decode()
     assert "clip-transcribe-row" in body
     assert "▸ transcribe" in body
+
+
+def test_transcript_page_renders(client, tmp_path, monkeypatch):
+    """A complete TranscribeJob with on-disk artifacts renders the viewer."""
+    import json as _j
+    from jobs import Job, JobStatus
+    from transcribe_jobs import TranscribeJob, TranscribeStatus
+
+    # Set up a parent media job + on-disk file + words.json
+    download_dir = tmp_path / "downloads"
+    download_dir.mkdir(parents=True, exist_ok=True)
+    media = download_dir / "abc1.mp4"
+    media.write_bytes(b"fake")
+    words_json = download_dir / "abc1.words.json"
+    words_json.write_text(_j.dumps({
+        "language": "en",
+        "duration": 12.0,
+        "segments": [{"start": 0.0, "end": 1.0, "text": "hello world",
+                      "words": [{"w": "hello", "start": 0.0, "end": 0.5},
+                                {"w": "world", "start": 0.5, "end": 1.0}]}],
+        "words": [],
+    }))
+
+    monkeypatch.setattr("app.DOWNLOAD_DIR", download_dir)
+
+    jm = client.application.extensions["trove.jobs"]
+    tjm = client.application.extensions["trove.transcribe"]
+    with jm._lock:
+        jm._jobs["abc1"] = Job(id="abc1", url="https://x", title="Hello",
+                                status=JobStatus.DONE,
+                                file_path=str(media), filename="abc1.mp4")
+    with tjm._lock:
+        tjm._jobs["t1"] = TranscribeJob(id="t1", parent_job_id="abc1",
+                                         model_used="ggml-base.bin",
+                                         status=TranscribeStatus.DONE)
+
+    res = client.get("/transcript/t1")
+    assert res.status_code == 200
+    body = res.data.decode()
+    assert "<video" in body or "<audio" in body
+    assert 'data-start="0.0"' in body
+    assert "hello" in body and "world" in body

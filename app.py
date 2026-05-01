@@ -471,6 +471,36 @@ def create_app() -> Flask:
             return "", 404
         return "", 200
 
+    @app.get("/transcript/<transcribe_id>")
+    def transcript_view(transcribe_id):
+        tj = transcribe_manager.get(transcribe_id)
+        if tj is None or tj.status != transcribe_jobs.TranscribeStatus.DONE:
+            return abort(404)
+        parent = job_manager.get(tj.parent_job_id)
+        if parent is None or not parent.file_path:
+            return abort(404)
+
+        base = os.path.splitext(parent.file_path)[0]
+        words_json_path = base + ".words.json"
+        if not os.path.exists(words_json_path):
+            return abort(404)
+
+        import json as _j
+        with open(words_json_path) as f:
+            data = _j.load(f)
+
+        ext = os.path.splitext(parent.file_path)[1].lower()
+        is_audio = ext in {".mp3", ".m4a", ".ogg", ".wav", ".flac"}
+
+        return render_template(
+            "transcript.html",
+            tj=tj,
+            parent=parent,
+            data=data,
+            is_audio=is_audio,
+            media_url=f"/api/file/{parent.id}",
+        )
+
     # --- helpers -----------------------------------------------------------
 
     def _enqueue_download(url: str, format_choice: str, format_id, title: str, thumbnail: str = "") -> str:

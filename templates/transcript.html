@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ parent.title }} · transcript · trove{% endblock %}
+{% block content %}
+<main class="transcript-page" data-transcribe-id="{{ tj.id }}">
+
+  <header class="transcript-head">
+    <div class="transcript-head-left">
+      <a class="transcript-mark" href="/">trove<span class="period">.</span></a>
+      <span class="transcript-breadcrumb">transcript</span>
+    </div>
+    <div class="transcript-exports">
+      <a class="transcript-export" href="/api/transcribe/{{ tj.id }}/export.txt">.txt</a>
+      <a class="transcript-export" href="/api/transcribe/{{ tj.id }}/export.srt">.srt</a>
+      <a class="transcript-export" href="/api/transcribe/{{ tj.id }}/export.vtt">.vtt</a>
+    </div>
+  </header>
+
+  <div class="transcript-meta">
+    <span class="transcript-stamp">NO. 002 / 2026</span>
+    <h1 class="transcript-title">{{ parent.title or "untitled" }}</h1>
+    <p class="transcript-submeta">
+      {{ "%d:%02d" | format((data.duration | int) // 60, (data.duration | int) % 60) }}
+      <span class="sep">·</span> {{ (data.language or "—") | upper }}
+      <span class="sep">·</span> {{ tj.model_used }}
+    </p>
+  </div>
+
+  <div class="transcript-grid">
+    <aside class="transcript-media">
+      {% if is_audio %}
+        <audio id="t-player" controls preload="metadata" src="{{ media_url }}"></audio>
+      {% else %}
+        <video id="t-player" controls preload="metadata" src="{{ media_url }}"></video>
+      {% endif %}
+    </aside>
+
+    <section class="transcript-body">
+      <div class="transcript-search-row">
+        <label for="t-search" class="sr-only">Search transcript</label>
+        <input id="t-search" type="search" placeholder="⚲ search transcript…" autocomplete="off">
+        <button type="button" id="t-prev" class="t-search-nav" aria-label="Previous match">↑</button>
+        <button type="button" id="t-next" class="t-search-nav" aria-label="Next match">↓</button>
+        <span id="t-search-count" class="t-search-count" aria-live="polite"></span>
+        <label class="t-follow">
+          <input type="checkbox" id="t-follow" checked>
+          <span>follow along</span>
+        </label>
+      </div>
+
+      <div class="transcript-text" id="t-text">
+        {% for seg in data.segments %}
+          <p class="t-segment" data-seg-start="{{ seg.start }}">
+            {% for w in seg.words %}<span class="word"
+                  tabindex="0"
+                  role="button"
+                  data-start="{{ w.start }}"
+                  data-end="{{ w.end }}"
+                  aria-label="word at {{ '%.2f' | format(w.start) }} seconds">{{ w.w }}</span>{% if not loop.last %} {% endif %}{% endfor %}
+          </p>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+
+</main>
+{% endblock %}
