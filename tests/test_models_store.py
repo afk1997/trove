@@ -1,3 +1,4 @@
+import hashlib
 import os
 import pytest
 from pathlib import Path
@@ -73,9 +74,6 @@ def test_known_models_metadata():
         assert meta["hf_url"].startswith("https://huggingface.co/ggerganov/whisper.cpp")
         assert len(meta["sha256"]) == 64
         assert all(c in "0123456789abcdef" for c in meta["sha256"].lower())
-
-
-import hashlib
 
 
 def _fake_response(payload: bytes, total_size: int | None = None):

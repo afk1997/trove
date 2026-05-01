@@ -10,7 +10,6 @@ The setup wizard owns this dir. The transcriber reads via get_active_path().
 from __future__ import annotations
 import hashlib
 import os
-import shutil
 import tempfile
 from pathlib import Path
 from urllib.request import urlopen as _urlopen
@@ -139,9 +138,15 @@ def download(name: str, progress_cb=None, verify: bool = True,
     Writes to <name>.part during transfer; renames to <name> on success.
     Optionally verifies SHA-256 against KNOWN_MODELS metadata.
 
+    Precondition: callers must ensure only one in-flight download per
+    model name. The .part file is unguarded; concurrent calls will
+    corrupt each other's output. The setup-model endpoint enforces this
+    via a single in-process flag (see app.py transcribe_setup_state).
+
     Raises:
         ValueError: unknown model name, or sha256 mismatch
-        OSError: network / disk error
+        OSError: network / disk error (urllib.error.URLError is a
+            subclass of OSError on CPython)
     """
     if name not in KNOWN_MODELS:
         raise ValueError(f"unknown model: {name}")
