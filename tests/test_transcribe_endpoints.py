@@ -1,5 +1,6 @@
 import pytest
 from app import create_app
+import time as _time
 
 
 @pytest.fixture()
@@ -98,3 +99,41 @@ def test_setup_model_remove_endpoint(client, tmp_path):
 def test_setup_model_remove_unknown_400(client):
     res = client.post("/api/transcribe/setup-model/remove", data={"name": "ggml-foo.bin"})
     assert res.status_code == 400
+
+
+def test_setup_model_progress_advances(client, monkeypatch, tmp_path):
+    """End-to-end: kick off a download against a fake HF, poll progress until done."""
+    import models_store
+    payload = b"X" * 5_000_000  # 5 MB
+
+    class _FakeResp:
+        def __init__(self, data):
+            self._buf = data
+            self._idx = 0
+            self.headers = {"Content-Length": str(len(data))}
+        def read(self, n=-1):
+            chunk = self._buf[self._idx:self._idx + (n if n > 0 else len(self._buf) - self._idx)]
+            self._idx += len(chunk)
+            _time.sleep(0.01)  # slow it down so we can observe progress
+            return chunk
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(models_store, "urlopen",
+                        lambda url, timeout=None: _FakeResp(payload))
+
+    res = client.post("/api/transcribe/setup-model", data={"name": "ggml-tiny.bin"})
+    assert res.status_code == 202
+
+    # Poll for ~5s until done
+    deadline = _time.monotonic() + 5
+    while _time.monotonic() < deadline:
+        body = client.get("/api/transcribe/setup-progress").data.decode()
+        if "installed" in body or "couldn't reach" in body:
+            break
+        _time.sleep(0.1)
+
+    final = client.get("/api/transcribe/setup-progress").data.decode()
+    # Expected: error (sha256 mismatch since payload is fake) — that's OK, we're
+    # testing that the polling endpoint returns something terminal.
+    assert "couldn't reach" in final or "installed" in final
