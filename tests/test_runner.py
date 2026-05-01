@@ -223,3 +223,138 @@ def test_run_download_cleans_orphans_on_timeout(monkeypatch, tmp_path):
     assert res.error_category == "timeout"
     assert not (tmp_path / "abc.part").exists()
     assert not (tmp_path / "abc.webm").exists()
+
+
+def test_download_argv_includes_concurrent_fragments():
+    argv = build_download_argv(
+        url="https://example.com/v",
+        out_template="/tmp/x.%(ext)s",
+        format_choice="video",
+        format_id=None,
+    )
+    idx = argv.index("--concurrent-fragments")
+    assert argv[idx + 1] == "4"  # default
+
+
+def test_download_argv_concurrent_fragments_env_clamps_high(monkeypatch):
+    monkeypatch.setenv("TROVE_CONCURRENT_FRAGMENTS", "100")
+    argv = build_download_argv(
+        url="https://example.com/v", out_template="/tmp/x.%(ext)s",
+        format_choice="video", format_id=None,
+    )
+    idx = argv.index("--concurrent-fragments")
+    assert argv[idx + 1] == "32"  # clamped to max
+
+
+def test_download_argv_concurrent_fragments_env_clamps_low(monkeypatch):
+    monkeypatch.setenv("TROVE_CONCURRENT_FRAGMENTS", "0")
+    argv = build_download_argv(
+        url="https://example.com/v", out_template="/tmp/x.%(ext)s",
+        format_choice="video", format_id=None,
+    )
+    idx = argv.index("--concurrent-fragments")
+    assert argv[idx + 1] == "1"  # clamped to min
+
+
+def test_download_argv_concurrent_fragments_env_handles_garbage(monkeypatch):
+    """Non-int env var should fall back to default 4, not crash."""
+    monkeypatch.setenv("TROVE_CONCURRENT_FRAGMENTS", "not-a-number")
+    argv = build_download_argv(
+        url="https://example.com/v", out_template="/tmp/x.%(ext)s",
+        format_choice="video", format_id=None,
+    )
+    idx = argv.index("--concurrent-fragments")
+    assert argv[idx + 1] == "4"  # fallback to default
+
+
+def test_download_argv_includes_retry_flags():
+    argv = build_download_argv(
+        url="https://example.com/v",
+        out_template="/tmp/x.%(ext)s",
+        format_choice="video",
+        format_id=None,
+    )
+    r_idx = argv.index("--retries")
+    fr_idx = argv.index("--fragment-retries")
+    assert argv[r_idx + 1] == "5"
+    assert argv[fr_idx + 1] == "10"
+
+
+def test_run_download_skips_cleanup_when_was_paused(monkeypatch, tmp_path):
+    """When the caller flags the job as paused, .part files must be preserved."""
+    from runner import run_download
+    out_template = str(tmp_path / "abc.%(ext)s")
+    part_file = tmp_path / "abc.mp4.part"
+    part_file.write_bytes(b"partial bytes")
+    other_part = tmp_path / "abc.webm"
+    other_part.write_bytes(b"x")
+
+    # Build a fake Popen that returns non-zero (as if it was killed)
+    class FakeProc:
+        returncode = -9
+        def __init__(self, *a, **kw):
+            self.stdout = iter([])
+            self.stderr = iter([])
+        def poll(self):
+            return -9
+        def wait(self, timeout=None):
+            return -9
+        def kill(self):
+            pass
+
+    monkeypatch.setattr("runner.subprocess.Popen", FakeProc)
+
+    # State set by JobManager.pause() before kill
+    pause_signal = {"was_paused": True}
+    def progress_cb(*args, **kwargs):
+        pass
+    def register_process(proc):
+        pass
+
+    # The streaming path needs to know it was paused. We'll signal via a
+    # sentinel kwarg threaded through.
+    res = run_download(
+        url="https://example.com/v",
+        out_template=out_template,
+        format_choice="video",
+        format_id=None,
+        progress_cb=progress_cb,
+        register_process=register_process,
+        was_paused_check=lambda: pause_signal["was_paused"],
+    )
+    assert part_file.exists()  # NOT cleaned up
+    assert other_part.exists()  # NOT cleaned up
+
+
+def test_run_download_runs_cleanup_when_not_paused(monkeypatch, tmp_path):
+    """When the failure was a real error, cleanup runs as before."""
+    from runner import run_download
+    out_template = str(tmp_path / "abc.%(ext)s")
+    part_file = tmp_path / "abc.mp4.part"
+    part_file.write_bytes(b"partial bytes")
+
+    class FakeProc:
+        returncode = 1
+        def __init__(self, *a, **kw):
+            self.stdout = iter([])
+            self.stderr = iter(["ERROR: video unavailable\n"])
+        def poll(self):
+            return 1
+        def wait(self, timeout=None):
+            return 1
+        def kill(self):
+            pass
+
+    monkeypatch.setattr("runner.subprocess.Popen", FakeProc)
+
+    res = run_download(
+        url="https://example.com/v",
+        out_template=out_template,
+        format_choice="video",
+        format_id=None,
+        progress_cb=lambda *a, **k: None,
+        register_process=lambda p: None,
+        was_paused_check=lambda: False,
+    )
+    assert not part_file.exists()  # cleaned up
+    assert res.error_category is not None

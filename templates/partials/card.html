@@ -38,6 +38,17 @@
   </div>
   <div class="clip-action">
     <span class="clip-error-stamp">✕ ERROR</span>
+    {% if card.id %}
+    <button
+      type="button"
+      class="clip-dismiss"
+      aria-label="Dismiss"
+      hx-post="/api/job/{{ card.id }}/dismiss"
+      hx-target="closest .clip"
+      hx-swap="outerHTML transition:true"
+      title="Dismiss this card"
+    ><span aria-hidden="true">✕</span></button>
+    {% endif %}
   </div>
 </div>
 
@@ -117,6 +128,23 @@
   </div>
   <div class="clip-action">
     <span class="clip-saving-stamp">Saving<span class="ellipsis">…</span></span>
+    <button
+      type="button"
+      class="clip-pause"
+      hx-post="/api/job/{{ card.id }}/pause"
+      hx-target="closest .clip"
+      hx-swap="outerHTML transition:true"
+      title="Pause download (keeps partial bytes)"
+    ><span aria-hidden="true">⏸</span> pause</button>
+    <button
+      type="button"
+      class="clip-cancel"
+      aria-label="Cancel download"
+      hx-post="/api/job/{{ card.id }}/cancel"
+      hx-target="closest .clip"
+      hx-swap="outerHTML transition:true"
+      title="Cancel download (deletes partial bytes)"
+    ><span aria-hidden="true">✕</span></button>
   </div>
   <div class="clip-progress">
     <div class="clip-progress-fill" style="width: {{ card.percent or 0 }}%"></div>
@@ -124,7 +152,7 @@
 </div>
 
 {% elif card.kind == "done" %}
-<div class="clip is-done" data-status="done">
+<div class="clip is-done" data-status="done"{% if initial_render %} data-auto-downloaded="1"{% endif %}>
   {{ thumb(card) }}
   <div class="clip-body">
     <p class="clip-title">{{ card.title or "untitled" }}</p>
@@ -137,6 +165,63 @@
   </div>
   <div class="clip-action">
     <span class="clip-saved-stamp">✓ saved</span>
+    <button
+      type="button"
+      class="clip-dismiss"
+      aria-label="Dismiss"
+      hx-post="/api/job/{{ card.id }}/dismiss"
+      hx-target="closest .clip"
+      hx-swap="outerHTML transition:true"
+      title="Dismiss this card"
+    ><span aria-hidden="true">✕</span></button>
+  </div>
+</div>
+
+{% elif card.kind == "paused" %}
+<div
+  class="clip is-paused"
+  data-job-id="{{ card.id }}"
+  data-status="paused"
+>
+  {{ thumb(card) }}
+  <div class="clip-body">
+    <p class="clip-title">{{ card.title or "untitled" }}</p>
+    <p class="clip-meta">
+      {% if card.total_bytes %}
+        {{ "%.1f"|format(card.downloaded_bytes / 1048576) }} MB
+        <span class="sep">/</span>{{ "%.1f"|format(card.total_bytes / 1048576) }} MB
+        <span class="sep">·</span>{{ card.percent }}%
+      {% elif card.fragment_count %}
+        {{ "%.1f"|format(card.downloaded_bytes / 1048576) }} MB
+        <span class="sep">·</span>{{ card.percent }}%
+        <span class="sep">·</span>FRAG {{ card.fragment_index }}/{{ card.fragment_count }}
+      {% else %}
+        PAUSED
+      {% endif %}
+      {% if card.total_bytes or card.fragment_count %}<span class="sep">·</span>PAUSED{% endif %}
+    </p>
+  </div>
+  <div class="clip-action">
+    <button
+      type="button"
+      class="clip-resume"
+      hx-post="/api/job/{{ card.id }}/resume"
+      hx-target="closest .clip"
+      hx-swap="outerHTML transition:true"
+      title="Resume download"
+    ><span aria-hidden="true">▶</span> resume</button>
+    <button
+      type="button"
+      class="clip-cancel"
+      aria-label="Cancel download"
+      hx-post="/api/job/{{ card.id }}/cancel"
+      hx-target="closest .clip"
+      hx-swap="outerHTML transition:true"
+      title="Cancel download (deletes partial bytes)"
+    ><span aria-hidden="true">✕</span></button>
+  </div>
+  <div class="clip-progress">
+    <div class="clip-progress-fill" style="width: {{ card.percent or 0 }}%"></div>
   </div>
 </div>
 
@@ -153,6 +238,17 @@
   </div>
   <div class="clip-action">
     <span class="clip-cancelled-stamp">cancelled</span>
+    {% if card.id %}
+    <button
+      type="button"
+      class="clip-dismiss"
+      aria-label="Dismiss"
+      hx-post="/api/job/{{ card.id }}/dismiss"
+      hx-target="closest .clip"
+      hx-swap="outerHTML transition:true"
+      title="Dismiss this card"
+    ><span aria-hidden="true">✕</span></button>
+    {% endif %}
   </div>
 </div>
 
