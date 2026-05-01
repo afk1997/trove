@@ -1,25 +1,41 @@
 {% extends "base.html" %}
+{% block title %}Trove · transcribe setup{% endblock %}
 {% block content %}
 <main class="setup-page">
   <header class="setup-header">
+    <span class="hero-corner-stamp">No. 002 / 2026</span>
     <h1 class="hero-mark">trove<span class="period">.</span></h1>
     <p class="setup-subtitle">
-      {% if settings_mode %}TRANSCRIBE SETTINGS{% else %}TRANSCRIBE SETUP — STEP 1 OF 2{% endif %}
+      {% if settings_mode %}
+        transcribe settings
+      {% else %}
+        transcribe setup · step 1 of 2
+      {% endif %}
     </p>
   </header>
 
-  <section class="setup-machine">
-    <h2>your machine</h2>
+  <section class="setup-machine{% if settings_mode %} is-collapsed{% endif %}">
+    <button type="button" class="setup-machine-toggle" aria-expanded="{% if settings_mode %}false{% else %}true{% endif %}">
+      <span>your machine</span>
+      <span class="setup-machine-toggle-caret" aria-hidden="true">▾</span>
+    </button>
     <ul class="setup-machine-grid">
-      <li><span>OS:</span> {{ machine_info.os_name }} {{ machine_info.os_version }} · {{ machine_info.arch }}</li>
-      <li><span>GPU:</span> {{ machine_info.gpu | upper }}</li>
-      <li><span>CPU:</span> {{ machine_info.cpu_cores }} cores · {{ machine_info.ram_gb }} GB RAM</li>
-      <li><span>Free disk:</span> {{ machine_info.free_disk_gb }} GB</li>
+      <li><span class="setup-machine-key">OS</span> {{ machine_info.os_name }} {{ machine_info.os_version }} · {{ machine_info.arch }}</li>
+      <li><span class="setup-machine-key">GPU</span> {{ machine_info.gpu | upper }}</li>
+      <li><span class="setup-machine-key">CPU</span> {{ machine_info.cpu_cores }} cores · {{ machine_info.ram_gb }} GB RAM</li>
+      <li><span class="setup-machine-key">DISK</span> {{ machine_info.free_disk_gb }} GB free</li>
     </ul>
   </section>
 
   <section class="setup-models">
-    <h2>{% if settings_mode %}models{% else %}pick a model{% endif %}</h2>
+    <h2 class="setup-section-h">
+      {% if settings_mode %}models{% else %}pick a model{% endif %}
+    </h2>
+    {% if not settings_mode %}
+      <p class="setup-section-sub">
+        runs locally on your machine. downloaded once from huggingface, then offline forever.
+      </p>
+    {% endif %}
     <div class="setup-model-grid">
       {% for m in models %}
         {% include "partials/model_card.html" %}
@@ -30,5 +46,28 @@
   <div id="setup-progress" hx-get="/api/transcribe/setup-progress" hx-trigger="load, every 1s" hx-swap="innerHTML">
     {% with state=setup_state %}{% include "partials/transcribe_setup_progress.html" %}{% endwith %}
   </div>
+
+  <a class="setup-back" href="/">← back to trove</a>
 </main>
+
+<script nonce="{{ g.csp_nonce }}">
+  // Machine probe collapse toggle.
+  (function () {
+    var toggle = document.querySelector('.setup-machine-toggle');
+    var section = document.querySelector('.setup-machine');
+    if (!toggle || !section) return;
+    toggle.addEventListener('click', function () {
+      var collapsed = section.classList.toggle('is-collapsed');
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+    });
+  })();
+
+  // When download completes, redirect home after 4 seconds.
+  document.addEventListener('htmx:afterSwap', function (e) {
+    if (e.target.id !== 'setup-progress') return;
+    if (e.target.querySelector('.setup-download.is-done')) {
+      setTimeout(function () { window.location.href = '/'; }, 4000);
+    }
+  });
+</script>
 {% endblock %}
