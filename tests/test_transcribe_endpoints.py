@@ -84,3 +84,17 @@ def test_setup_model_endpoint_busy_returns_409(client, monkeypatch):
     r2 = client.post("/api/transcribe/setup-model", data={"name": "ggml-base.bin"})
     assert r2.status_code == 409
     block.set()
+
+
+def test_setup_model_remove_endpoint(client, tmp_path):
+    import models_store
+    (tmp_path / "models").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "models" / "ggml-base.bin").write_bytes(b"x")
+    res = client.post("/api/transcribe/setup-model/remove", data={"name": "ggml-base.bin"})
+    assert res.status_code == 200
+    assert not (tmp_path / "models" / "ggml-base.bin").exists()
+
+
+def test_setup_model_remove_unknown_400(client):
+    res = client.post("/api/transcribe/setup-model/remove", data={"name": "ggml-foo.bin"})
+    assert res.status_code == 400

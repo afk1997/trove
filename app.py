@@ -359,6 +359,15 @@ def create_app() -> Flask:
         Thread(target=_worker, daemon=True, name="trove-model-download").start()
         return ("", 202)
 
+    @app.post("/api/transcribe/setup-model/remove")
+    @token_required
+    def api_transcribe_setup_model_remove():
+        name = request.form.get("name") or (request.get_json(silent=True) or {}).get("name", "")
+        if name not in models_store.KNOWN_MODELS:
+            return jsonify({"error": "unknown_model"}), 400
+        models_store.remove(name)
+        return ("", 200)
+
     @app.get("/api/transcribe/setup-progress")
     @token_required
     def api_transcribe_setup_progress():

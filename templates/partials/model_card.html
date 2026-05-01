@@ -1,25 +1,49 @@
-<article class="model-card{% if m.is_active %} is-active{% endif %}">
+<article class="model-card{% if m.is_active %} is-active{% endif %}{% if m.is_installed and not m.is_active %} is-installed{% endif %}">
   <header class="model-card-head">
-    <h3>{{ m.label }}</h3>
-    <span class="model-card-file">{{ m.name }}</span>
+    <h3 class="model-card-label">{{ m.label }}</h3>
+    <code class="model-card-file">{{ m.name }}</code>
   </header>
+
   <p class="model-card-meta">
     {{ "%.0f" | format(m.size_bytes / 1048576) }} MB
-    · ~{{ "%.1f" | format(m.rtf) }}× realtime
-    · {{ "★" * m.stars }}{{ "☆" * (5 - m.stars) }}
+    <span class="sep">·</span>
+    ~{{ "%.1f" | format(m.rtf) }}× realtime
+    <span class="sep">·</span>
+    <span class="model-card-stars" aria-label="{{ m.stars }} of 5 stars">{{ "★" * m.stars }}{{ "☆" * (5 - m.stars) }}</span>
+    {% if m.multilingual %}<span class="sep">·</span> multilingual{% endif %}
   </p>
+
   <p class="model-card-source">
-    source ↗ {{ m.hf_url }}
+    <span class="model-card-source-label">source ↗</span>
+    <code class="model-card-url">{{ m.hf_url | replace("https://", "") }}</code>
   </p>
+
+  <p class="model-card-sha">
+    <span class="model-card-sha-label">sha-256</span>
+    <code>{{ m.sha256[:16] }}…{{ m.sha256[-4:] }}</code>
+  </p>
+
   {% if m.is_active %}
-    <span class="model-card-stamp">✓ ACTIVE</span>
+    <div class="model-card-active">
+      <span class="model-card-stamp">✓ ACTIVE</span>
+      <div class="model-card-actions">
+        <form hx-post="/api/transcribe/setup-model" hx-swap="none">
+          <input type="hidden" name="name" value="{{ m.name }}">
+          <button type="submit" class="model-card-action">redownload</button>
+        </form>
+        <form hx-post="/api/transcribe/setup-model/remove" hx-swap="none"
+              hx-confirm="remove {{ m.name }}? you'll need to re-download to use it.">
+          <input type="hidden" name="name" value="{{ m.name }}">
+          <button type="submit" class="model-card-action is-danger">remove</button>
+        </form>
+      </div>
+    </div>
   {% else %}
-    <form
-      hx-post="/api/transcribe/setup-model"
-      hx-swap="none"
-    >
+    <form hx-post="/api/transcribe/setup-model" hx-swap="none">
       <input type="hidden" name="name" value="{{ m.name }}">
-      <button type="submit" class="model-card-pick">pick this model ↗</button>
+      <button type="submit" class="model-card-pick">
+        {% if m.is_installed %}switch to this ↗{% else %}pick this model ↗{% endif %}
+      </button>
     </form>
   {% endif %}
 </article>
