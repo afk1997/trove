@@ -200,6 +200,15 @@ def create_app() -> Flask:
             return "", 200
         return render_template("partials/card.html", card=_card_view(job))
 
+    @app.post("/api/job/<job_id>/dismiss")
+    @token_required
+    def api_job_dismiss(job_id):
+        ok = job_manager.dismiss(job_id)
+        if not ok:
+            return "", 404
+        # Empty body + outerHTML swap on the client → card removed from the DOM.
+        return "", 200
+
     @app.post("/api/job/<job_id>/pause")
     @token_required
     def api_job_pause(job_id):

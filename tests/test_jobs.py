@@ -351,3 +351,80 @@ def test_snapshot_jobs_returns_insertion_ordered_list():
     snap = jm.snapshot_jobs()
     assert [j.id for j in snap] == [j1, j2]
     jm.shutdown()
+
+
+def test_dismiss_removes_done_job_and_file(tmp_path):
+    """Dismiss a DONE job: pop from _jobs, delete file_path on disk."""
+    jm = JobManager(max_workers=1, ttl_seconds=60)
+    f = tmp_path / "out.bin"
+    f.write_bytes(b"saved")
+
+    def work(job: Job):
+        job.file_path = str(f)
+
+    jid = jm.submit(target=work, title="t", url="https://x")
+    for _ in range(50):
+        if jm.get(jid).status == JobStatus.DONE:
+            break
+        time.sleep(0.05)
+
+    assert jm.dismiss(jid) is True
+    assert jm.get(jid) is None
+    assert not f.exists()
+    jm.shutdown()
+
+
+def test_dismiss_removes_error_job():
+    """Dismiss on an ERROR job removes the entry from _jobs."""
+    jm = JobManager(max_workers=1, ttl_seconds=60)
+    j = Job(id="errjob1", url="https://x", title="t", status=JobStatus.ERROR,
+            error_category="unknown", error_message="boom")
+    with jm._lock:
+        jm._jobs["errjob1"] = j
+
+    assert jm.dismiss("errjob1") is True
+    assert jm.get("errjob1") is None
+    jm.shutdown()
+
+
+def test_dismiss_removes_cancelled_job():
+    """Dismiss on a CANCELLED job removes the entry from _jobs."""
+    jm = JobManager(max_workers=1, ttl_seconds=60)
+    j = Job(id="canjob1", url="https://x", title="t", status=JobStatus.CANCELLED)
+    with jm._lock:
+        jm._jobs["canjob1"] = j
+
+    assert jm.dismiss("canjob1") is True
+    assert jm.get("canjob1") is None
+    jm.shutdown()
+
+
+def test_dismiss_refuses_running_job():
+    """Dismiss on DOWNLOADING returns False; job stays in _jobs."""
+    jm = JobManager(max_workers=1, ttl_seconds=60)
+    jid = jm.submit(target=lambda j: time.sleep(2), title="t", url="https://x")
+    # Give the worker a moment to flip status to DOWNLOADING
+    for _ in range(20):
+        if jm.get(jid).status == JobStatus.DOWNLOADING:
+            break
+        time.sleep(0.02)
+    assert jm.dismiss(jid) is False
+    assert jm.get(jid) is not None
+    jm.shutdown()
+
+
+def test_dismiss_refuses_paused_job():
+    """Dismiss on PAUSED returns False; user must cancel first."""
+    jm = JobManager(max_workers=1, ttl_seconds=60)
+    j = Job(id="pjob1", url="https://x", title="t", status=JobStatus.PAUSED)
+    with jm._lock:
+        jm._jobs["pjob1"] = j
+    assert jm.dismiss("pjob1") is False
+    assert jm.get("pjob1") is not None
+    jm.shutdown()
+
+
+def test_dismiss_returns_false_for_unknown_id():
+    jm = JobManager(max_workers=1, ttl_seconds=60)
+    assert jm.dismiss("nope") is False
+    jm.shutdown()

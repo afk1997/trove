@@ -182,6 +182,29 @@ class JobManager:
         self._persist()
         return True
 
+    def dismiss(self, job_id: str) -> bool:
+        """Remove a terminal-state job from the queue and delete its file.
+
+        Symmetric with the TTL sweep but user-triggered. Refuses non-terminal
+        jobs (caller should cancel or pause first to avoid orphaning a running
+        yt-dlp subprocess).
+        """
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return False
+            if job.status not in {JobStatus.DONE, JobStatus.ERROR, JobStatus.CANCELLED}:
+                return False
+            file_path = job.file_path
+            del self._jobs[job_id]
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+        self._persist()
+        return True
+
     def pause(self, job_id: str) -> bool:
         """Pause an active or queued job. Keeps .part files for resume.
 

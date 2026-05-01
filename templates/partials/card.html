@@ -38,6 +38,17 @@
   </div>
   <div class="clip-action">
     <span class="clip-error-stamp">✕ ERROR</span>
+    {% if card.id %}
+    <button
+      type="button"
+      class="clip-cancel"
+      aria-label="Dismiss"
+      hx-post="/api/job/{{ card.id }}/dismiss"
+      hx-target="closest .clip"
+      hx-swap="outerHTML transition:true"
+      title="Dismiss this card"
+    ><span aria-hidden="true">✕</span></button>
+    {% endif %}
   </div>
 </div>
 
@@ -154,6 +165,15 @@
   </div>
   <div class="clip-action">
     <span class="clip-saved-stamp">✓ saved</span>
+    <button
+      type="button"
+      class="clip-cancel"
+      aria-label="Dismiss"
+      hx-post="/api/job/{{ card.id }}/dismiss"
+      hx-target="closest .clip"
+      hx-swap="outerHTML transition:true"
+      title="Dismiss this card"
+    ><span aria-hidden="true">✕</span></button>
   </div>
 </div>
 
@@ -218,6 +238,17 @@
   </div>
   <div class="clip-action">
     <span class="clip-cancelled-stamp">cancelled</span>
+    {% if card.id %}
+    <button
+      type="button"
+      class="clip-cancel"
+      aria-label="Dismiss"
+      hx-post="/api/job/{{ card.id }}/dismiss"
+      hx-target="closest .clip"
+      hx-swap="outerHTML transition:true"
+      title="Dismiss this card"
+    ><span aria-hidden="true">✕</span></button>
+    {% endif %}
   </div>
 </div>
 

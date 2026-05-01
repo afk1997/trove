@@ -137,6 +137,45 @@ def test_index_renders_persisted_paused_jobs(client):
     assert "▶</span> resume" in body  # decorative glyph wrapped per a11y
 
 
+def test_dismiss_endpoint_returns_empty_200(client):
+    """POST /api/job/<id>/dismiss on a DONE job returns empty 200; the job
+    is then unknown to subsequent requests.
+    """
+    from jobs import Job, JobStatus
+    jm = client.application.extensions["trove.jobs"]
+    with jm._lock:
+        jm._jobs["dismissme"] = Job(
+            id="dismissme", url="https://e.com", title="Done",
+            status=JobStatus.DONE, file_path=None, filename="x.mp4",
+        )
+
+    res = client.post("/api/job/dismissme/dismiss")
+    assert res.status_code == 200
+    assert res.data == b""
+    assert client.get("/api/status-card/dismissme").status_code == 404
+
+
+def test_dismiss_endpoint_404_for_unknown_id(client):
+    res = client.post("/api/job/unknownid12/dismiss")
+    assert res.status_code == 404
+
+
+def test_dismiss_endpoint_404_for_running_job(client):
+    """Dismiss on a non-terminal job (DOWNLOADING) refuses with 404."""
+    from jobs import Job, JobStatus
+    jm = client.application.extensions["trove.jobs"]
+    with jm._lock:
+        jm._jobs["livejob1"] = Job(
+            id="livejob1", url="https://e.com", title="Live",
+            status=JobStatus.DOWNLOADING,
+        )
+    res = client.post("/api/job/livejob1/dismiss")
+    assert res.status_code == 404
+    # Job still present
+    with jm._lock:
+        assert "livejob1" in jm._jobs
+
+
 def test_index_persisted_done_cards_marked_already_downloaded(client):
     """Persisted DONE cards must carry data-auto-downloaded so the JS auto-
     downloader doesn't re-trigger every saved file on next htmx swap.
