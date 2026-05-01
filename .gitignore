@@ -15,6 +15,9 @@ tools/
 # Downloads (runtime)
 downloads/
 
+# Whisper model cache (downloaded at runtime by setup wizard)
+models/
+
 # IDE
 .vscode/
 .idea/

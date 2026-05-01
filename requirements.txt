@@ -3,3 +3,5 @@ flask>=3.0
 # trove.sh / Dockerfile install this from the GitHub master tarball directly.
 yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz
 pytest>=8.0
+pywhispercpp>=1.2.0
+psutil>=5.9
