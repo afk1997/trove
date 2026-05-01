@@ -360,6 +360,7 @@ def create_app() -> Flask:
         return ("", 202)
 
     @app.get("/api/transcribe/setup-progress")
+    @token_required
     def api_transcribe_setup_progress():
         return render_template(
             "partials/transcribe_setup_progress.html",
