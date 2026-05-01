@@ -8,10 +8,15 @@ Files in this dir:
 The setup wizard owns this dir. The transcriber reads via get_active_path().
 """
 from __future__ import annotations
+import hashlib
 import os
 import shutil
 import tempfile
 from pathlib import Path
+from urllib.request import urlopen as _urlopen
+
+# Re-exported so tests can monkeypatch
+urlopen = _urlopen
 
 
 # Default location: <repo>/models/. Tests monkeypatch this.
@@ -125,3 +130,62 @@ def remove(name: str) -> None:
             active_file.unlink()
         except OSError:
             pass
+
+
+def download(name: str, progress_cb=None, verify: bool = True,
+             chunk_size: int = 64 * 1024, timeout: int = 60) -> None:
+    """Download a known model from HuggingFace, atomically.
+
+    Writes to <name>.part during transfer; renames to <name> on success.
+    Optionally verifies SHA-256 against KNOWN_MODELS metadata.
+
+    Raises:
+        ValueError: unknown model name, or sha256 mismatch
+        OSError: network / disk error
+    """
+    if name not in KNOWN_MODELS:
+        raise ValueError(f"unknown model: {name}")
+    _ensure_dir()
+    meta = KNOWN_MODELS[name]
+    final = MODELS_DIR / name
+    part = MODELS_DIR / (name + ".part")
+
+    sha = hashlib.sha256()
+    received = 0
+    total = meta["size_bytes"]
+
+    try:
+        with urlopen(meta["hf_url"], timeout=timeout) as resp:
+            content_length = resp.headers.get("Content-Length")
+            if content_length:
+                total = int(content_length)
+            with open(part, "wb") as f:
+                while True:
+                    chunk = resp.read(chunk_size)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    sha.update(chunk)
+                    received += len(chunk)
+                    if progress_cb:
+                        try:
+                            progress_cb(received, total)
+                        except Exception:
+                            pass
+
+        # Verify SHA-256 if requested
+        digest = sha.hexdigest()
+        if verify and digest != meta["sha256"]:
+            part.unlink(missing_ok=True)
+            raise ValueError(
+                f"sha256 mismatch for {name}: expected {meta['sha256']}, got {digest}"
+            )
+
+        # Atomic rename + write sidecar
+        os.replace(part, final)
+        (MODELS_DIR / (name + ".sha256")).write_text(digest + "\n")
+    except Exception:
+        # Clean up the .part file on any error
+        try: part.unlink(missing_ok=True)
+        except OSError: pass
+        raise

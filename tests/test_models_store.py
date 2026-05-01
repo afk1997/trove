@@ -73,3 +73,92 @@ def test_known_models_metadata():
         assert meta["hf_url"].startswith("https://huggingface.co/ggerganov/whisper.cpp")
         assert len(meta["sha256"]) == 64
         assert all(c in "0123456789abcdef" for c in meta["sha256"].lower())
+
+
+import hashlib
+
+
+def _fake_response(payload: bytes, total_size: int | None = None):
+    """Build a fake urlopen response with .read(n) and .headers."""
+    class FakeResp:
+        def __init__(self, data, total):
+            self._buf = data
+            self._idx = 0
+            self.headers = {"Content-Length": str(total)} if total is not None else {}
+
+        def read(self, n=-1):
+            if n < 0 or n > len(self._buf) - self._idx:
+                chunk = self._buf[self._idx:]
+                self._idx = len(self._buf)
+            else:
+                chunk = self._buf[self._idx:self._idx + n]
+                self._idx += n
+            return chunk
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    return FakeResp(payload, total_size if total_size is not None else len(payload))
+
+
+def test_download_writes_atomic_with_progress(tmp_models_dir, monkeypatch):
+    """download() saves the file with atomic rename and emits progress."""
+    payload = b"FAKEMODELDATA" * 1000
+    monkeypatch.setattr(
+        models_store, "urlopen",
+        lambda url, timeout=None: _fake_response(payload, len(payload))
+    )
+
+    progress_events = []
+
+    def cb(received: int, total: int):
+        progress_events.append((received, total))
+
+    target = "ggml-tiny.bin"
+    # Skip SHA verification for this test by passing verify=False
+    models_store.download(target, progress_cb=cb, verify=False)
+
+    final = tmp_models_dir / target
+    assert final.exists()
+    assert final.read_bytes() == payload
+    # No leftover .part files
+    assert not (tmp_models_dir / (target + ".part")).exists()
+    # Progress was emitted at least once and final progress equals total
+    assert progress_events
+    assert progress_events[-1] == (len(payload), len(payload))
+
+
+def test_download_verifies_sha256(tmp_models_dir, monkeypatch):
+    """download() rejects the file if SHA-256 doesn't match KNOWN_MODELS metadata."""
+    payload = b"WRONGDATA" * 100
+    monkeypatch.setattr(
+        models_store, "urlopen",
+        lambda url, timeout=None: _fake_response(payload, len(payload))
+    )
+
+    # The KNOWN_MODELS sha256 won't match this random payload
+    with pytest.raises(ValueError, match="sha-?256"):
+        models_store.download("ggml-tiny.bin", verify=True)
+
+    # No file should be left behind
+    assert not (tmp_models_dir / "ggml-tiny.bin").exists()
+    assert not (tmp_models_dir / "ggml-tiny.bin.part").exists()
+
+
+def test_download_writes_sha256_sidecar(tmp_models_dir, monkeypatch):
+    payload = b"SOMECONTENT" * 500
+    monkeypatch.setattr(
+        models_store, "urlopen",
+        lambda url, timeout=None: _fake_response(payload, len(payload))
+    )
+    models_store.download("ggml-tiny.bin", verify=False)
+    sha = hashlib.sha256(payload).hexdigest()
+    assert (tmp_models_dir / "ggml-tiny.bin.sha256").read_text().strip() == sha
+
+
+def test_download_unknown_model_raises():
+    with pytest.raises(ValueError, match="unknown model"):
+        models_store.download("ggml-foo.bin")
