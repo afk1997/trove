@@ -41,7 +41,7 @@
     {% if card.id %}
     <button
       type="button"
-      class="clip-cancel"
+      class="clip-dismiss"
       aria-label="Dismiss"
       hx-post="/api/job/{{ card.id }}/dismiss"
       hx-target="closest .clip"
@@ -167,7 +167,7 @@
     <span class="clip-saved-stamp">✓ saved</span>
     <button
       type="button"
-      class="clip-cancel"
+      class="clip-dismiss"
       aria-label="Dismiss"
       hx-post="/api/job/{{ card.id }}/dismiss"
       hx-target="closest .clip"
@@ -241,7 +241,7 @@
     {% if card.id %}
     <button
       type="button"
-      class="clip-cancel"
+      class="clip-dismiss"
       aria-label="Dismiss"
       hx-post="/api/job/{{ card.id }}/dismiss"
       hx-target="closest .clip"
