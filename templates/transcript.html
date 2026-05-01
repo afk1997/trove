@@ -63,4 +63,112 @@
   </div>
 
 </main>
+
+<script nonce="{{ g.csp_nonce }}">
+  (function () {
+    const player = document.getElementById('t-player');
+    const words = Array.from(document.querySelectorAll('.transcript-text .word'));
+    const search = document.getElementById('t-search');
+    const prev = document.getElementById('t-prev');
+    const next = document.getElementById('t-next');
+    const countEl = document.getElementById('t-search-count');
+    const followToggle = document.getElementById('t-follow');
+
+    if (!player || !words.length) return;
+
+    // ----- Click-to-seek -----------------------------------------------
+    words.forEach(function (w) {
+      const seek = function () {
+        player.currentTime = parseFloat(w.dataset.start) || 0;
+        player.play().catch(function () {});
+      };
+      w.addEventListener('click', seek);
+      w.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); seek(); }
+      });
+    });
+
+    // ----- Active-word highlight (binary search) -----------------------
+    let activeIdx = -1;
+    function findActive(t) {
+      let lo = 0, hi = words.length - 1, found = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (parseFloat(words[mid].dataset.start) <= t) { found = mid; lo = mid + 1; }
+        else { hi = mid - 1; }
+      }
+      return found;
+    }
+    player.addEventListener('timeupdate', function () {
+      const idx = findActive(player.currentTime);
+      if (idx === activeIdx) return;
+      if (activeIdx >= 0) words[activeIdx].classList.remove('is-active');
+      activeIdx = idx;
+      if (idx >= 0) {
+        words[idx].classList.add('is-active');
+        if (followToggle && followToggle.checked) {
+          words[idx].scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+      }
+    });
+
+    // ----- Search -------------------------------------------------------
+    let matchIdxs = [];
+    let currentMatch = -1;
+
+    function clearMatches() {
+      words.forEach(function (w) { w.classList.remove('is-match', 'is-current-match'); });
+      matchIdxs = [];
+      currentMatch = -1;
+      countEl.textContent = '';
+    }
+
+    function applySearch() {
+      const q = (search.value || '').trim().toLowerCase();
+      clearMatches();
+      if (!q) return;
+      words.forEach(function (w, i) {
+        if (w.textContent.toLowerCase().indexOf(q) !== -1) {
+          w.classList.add('is-match');
+          matchIdxs.push(i);
+        }
+      });
+      countEl.textContent = matchIdxs.length ? matchIdxs.length + ' matches' : 'no matches';
+      if (matchIdxs.length) {
+        currentMatch = 0;
+        markCurrent();
+      }
+    }
+
+    function markCurrent() {
+      words.forEach(function (w) { w.classList.remove('is-current-match'); });
+      if (currentMatch >= 0 && currentMatch < matchIdxs.length) {
+        const w = words[matchIdxs[currentMatch]];
+        w.classList.add('is-current-match');
+        w.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    }
+
+    function step(delta) {
+      if (!matchIdxs.length) return;
+      currentMatch = (currentMatch + delta + matchIdxs.length) % matchIdxs.length;
+      markCurrent();
+      const w = words[matchIdxs[currentMatch]];
+      player.currentTime = parseFloat(w.dataset.start) || 0;
+    }
+
+    if (search) search.addEventListener('input', applySearch);
+    if (prev) prev.addEventListener('click', function () { step(-1); });
+    if (next) next.addEventListener('click', function () { step(+1); });
+
+    // Cmd/Ctrl + F focuses our search instead of browser find
+    document.addEventListener('keydown', function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault(); search && search.focus();
+      } else if (e.key === 'Enter' && document.activeElement === search) {
+        e.preventDefault(); step(e.shiftKey ? -1 : +1);
+      }
+    });
+  })();
+</script>
 {% endblock %}
