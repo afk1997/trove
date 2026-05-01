@@ -296,6 +296,15 @@
   }
   .hero-ticker .right { color: var(--orange); }
 
+  .hero-ticker-link {
+    color: var(--teal);
+    text-decoration: underline;
+    text-decoration-style: dashed;
+    text-underline-offset: 3px;
+    margin-right: 8px;
+  }
+  .hero-ticker-link:hover { color: var(--orange); }
+
   .hero-corner-stamp {
     position: absolute;
     top: 18px; right: 22px;

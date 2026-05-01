@@ -82,6 +82,35 @@ export TROVE_COOKIES_FROM_BROWSER=safari   # or chrome / firefox / brave / edge
 
 the browser must be installed on the host and have an active YouTube session.
 
+## transcription
+
+trove can transcribe any saved audio or video locally using whisper.cpp. no api keys, no cloud, no telemetry.
+
+**first time:**
+1. save a media file (the existing flow)
+2. on the saved card, click `▸ transcribe`
+3. you'll see a one-time consent dialog explaining what's about to happen
+4. click `set it up ↗` — you'll land on `/transcribe/setup`
+5. trove auto-detects your machine (Metal on M-series Mac, CUDA on NVIDIA Linux, AVX/CPU otherwise) and shows four model options with realistic speed estimates for *your* machine
+6. pick one. trove downloads it from `huggingface.co/ggerganov/whisper.cpp` (one-time, ~140MB for `base`)
+7. you're done. transcription works offline forever after.
+
+**after first setup:**
+- click `▸ transcribe` on any saved card → progress bar → `▸ view transcript ↗` opens a two-pane viewer in a new tab
+- click any word in the transcript to seek the video to that timestamp
+- search the transcript inline (Cmd/Ctrl + F)
+- export `.txt`, `.srt`, or `.vtt`
+
+**model storage:**
+models live at `<trove>/models/ggml-*.bin`. swap or remove via the same setup page in settings mode (footer link `transcribe settings ↗`).
+
+**Docker:** the model directory is auto-persisted via a Docker volume. To make it visible/mountable on the host, run:
+```
+docker run -v ./models:/app/models -v ./downloads:/app/downloads -p 8899:8899 trove
+```
+
+**network policy:** the only outbound calls trove makes are (1) yt-dlp fetching the original media, and (2) the model download from huggingface during the setup wizard. transcription itself is 100% local.
+
 ## stack
 
 - **backend:** Python 3.12 + Flask

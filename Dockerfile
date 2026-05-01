@@ -28,6 +28,11 @@ WORKDIR /app
 COPY requirements.txt .
 # requirements.txt installs yt-dlp from its master branch (current YouTube extractors).
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Persist the whisper model cache across container restarts.
+# Users wanting explicit control can bind-mount: -v ./models:/app/models
+VOLUME /app/models
+
 COPY app.py jobs.py runner.py safety.py ./
 COPY templates/ ./templates/
 COPY static/ ./static/
