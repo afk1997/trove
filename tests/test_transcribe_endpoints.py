@@ -241,3 +241,62 @@ def test_transcript_page_renders(client, tmp_path, monkeypatch):
     assert "<video" in body or "<audio" in body
     assert 'data-start="0.0"' in body
     assert "hello" in body and "world" in body
+
+
+def _setup_done_transcribe(client, tmp_path):
+    """Helper: build a parent media + done TranscribeJob + on-disk side-files."""
+    from jobs import Job, JobStatus
+    from transcribe_jobs import TranscribeJob, TranscribeStatus
+
+    download_dir = tmp_path / "downloads"
+    download_dir.mkdir(parents=True, exist_ok=True)
+    media = download_dir / "xx9.mp4"
+    media.write_bytes(b"fake")
+    (download_dir / "xx9.txt").write_text("hello world\n")
+    (download_dir / "xx9.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n")
+    (download_dir / "xx9.vtt").write_text("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nhello\n")
+
+    jm = client.application.extensions["trove.jobs"]
+    tjm = client.application.extensions["trove.transcribe"]
+    with jm._lock:
+        jm._jobs["xx9"] = Job(id="xx9", url="https://x", title="HW",
+                              status=JobStatus.DONE,
+                              file_path=str(media), filename="xx9.mp4")
+    with tjm._lock:
+        tjm._jobs["tx9"] = TranscribeJob(id="tx9", parent_job_id="xx9",
+                                          model_used="ggml-base.bin",
+                                          status=TranscribeStatus.DONE)
+
+
+def test_export_txt(client, tmp_path):
+    _setup_done_transcribe(client, tmp_path)
+    res = client.get("/api/transcribe/tx9/export.txt")
+    assert res.status_code == 200
+    assert res.mimetype == "text/plain"
+    assert b"hello world" in res.data
+
+
+def test_export_srt(client, tmp_path):
+    _setup_done_transcribe(client, tmp_path)
+    res = client.get("/api/transcribe/tx9/export.srt")
+    assert res.status_code == 200
+    assert "x-subrip" in res.mimetype
+
+
+def test_export_vtt(client, tmp_path):
+    _setup_done_transcribe(client, tmp_path)
+    res = client.get("/api/transcribe/tx9/export.vtt")
+    assert res.status_code == 200
+    assert "vtt" in res.mimetype
+    assert b"WEBVTT" in res.data
+
+
+def test_export_unknown_format_404(client, tmp_path):
+    _setup_done_transcribe(client, tmp_path)
+    res = client.get("/api/transcribe/tx9/export.json")
+    assert res.status_code == 404
+
+
+def test_export_unknown_id_404(client):
+    res = client.get("/api/transcribe/zzz/export.txt")
+    assert res.status_code == 404

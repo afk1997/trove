@@ -471,6 +471,28 @@ def create_app() -> Flask:
             return "", 404
         return "", 200
 
+    @app.get("/api/transcribe/<transcribe_id>/export.<fmt>")
+    def api_transcribe_export(transcribe_id, fmt):
+        if fmt not in {"txt", "srt", "vtt"}:
+            return abort(404)
+        tj = transcribe_manager.get(transcribe_id)
+        if tj is None or tj.status != transcribe_jobs.TranscribeStatus.DONE:
+            return abort(404)
+        parent = job_manager.get(tj.parent_job_id)
+        if parent is None or not parent.file_path:
+            return abort(404)
+        base = os.path.splitext(parent.file_path)[0]
+        path = base + "." + fmt
+        if not os.path.exists(path):
+            return abort(404)
+        mime = {
+            "txt": "text/plain; charset=utf-8",
+            "srt": "application/x-subrip",
+            "vtt": "text/vtt; charset=utf-8",
+        }[fmt]
+        download_name = sanitize_filename(parent.title or "transcript", "." + fmt)
+        return send_file(path, mimetype=mime, as_attachment=True, download_name=download_name)
+
     @app.get("/transcript/<transcribe_id>")
     def transcript_view(transcribe_id):
         tj = transcribe_manager.get(transcribe_id)
