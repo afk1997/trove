@@ -52,6 +52,7 @@ def test_remove_deletes_file_and_clears_active_if_active(tmp_models_dir):
     models_store.remove("ggml-base.bin")
     assert not (tmp_models_dir / "ggml-base.bin").exists()
     assert models_store.get_active() is None
+    assert not (tmp_models_dir / "ACTIVE").exists()
 
 
 def test_remove_keeps_active_if_removing_other(tmp_models_dir):
@@ -70,3 +71,5 @@ def test_known_models_metadata():
         assert "size_bytes" in meta
         assert "hf_url" in meta
         assert meta["hf_url"].startswith("https://huggingface.co/ggerganov/whisper.cpp")
+        assert len(meta["sha256"]) == 64
+        assert all(c in "0123456789abcdef" for c in meta["sha256"].lower())

@@ -25,7 +25,7 @@ KNOWN_MODELS: dict[str, dict] = {
     "ggml-tiny.bin": {
         "size_bytes": 39_000_000,
         "hf_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
-        "sha256": "bd577a113a864445d4c299885e0cb97d4ba92b5f",  # verify on first download
+        "sha256": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
         "label": "tiny",
         "stars": 2,
         "multilingual": True,
@@ -33,7 +33,7 @@ KNOWN_MODELS: dict[str, dict] = {
     "ggml-base.bin": {
         "size_bytes": 142_000_000,
         "hf_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
-        "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf",
+        "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
         "label": "base",
         "stars": 3,
         "multilingual": True,
@@ -41,7 +41,7 @@ KNOWN_MODELS: dict[str, dict] = {
     "ggml-small.bin": {
         "size_bytes": 466_000_000,
         "hf_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
-        "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e9",
+        "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
         "label": "small",
         "stars": 4,
         "multilingual": True,
@@ -113,11 +113,15 @@ def remove(name: str) -> None:
     _ensure_dir()
     bin_path = MODELS_DIR / name
     sha_path = MODELS_DIR / (name + ".sha256")
+    active_file = MODELS_DIR / "ACTIVE"
+    # Read ACTIVE before removing the binary so the stale-guard doesn't fire.
+    was_active = active_file.exists() and active_file.read_text().strip() == name
     if bin_path.exists():
         bin_path.unlink()
     if sha_path.exists():
         sha_path.unlink()
-    if get_active() == name:
-        active_file = MODELS_DIR / "ACTIVE"
-        if active_file.exists():
+    if was_active:
+        try:
             active_file.unlink()
+        except OSError:
+            pass
