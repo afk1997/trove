@@ -179,7 +179,6 @@ def attach_security_headers(app):
     def _set_headers(response):
         nonce = getattr(g, "csp_nonce", "")
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
@@ -188,7 +187,7 @@ def attach_security_headers(app):
             f"font-src 'self' https://fonts.gstatic.com; "
             f"script-src 'self' 'nonce-{nonce}'; "
             "connect-src 'self'; "
-            "frame-ancestors 'none'"
+            "frame-ancestors *"
         )
         return response
 
