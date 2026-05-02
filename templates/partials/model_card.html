@@ -1,4 +1,7 @@
-<article class="model-card{% if m.is_active %} is-active{% endif %}{% if m.is_installed and not m.is_active %} is-installed{% endif %}">
+<article class="model-card{% if m.is_active %} is-active{% endif %}{% if m.is_installed and not m.is_active %} is-installed{% endif %}{% if m.label == 'base' and not active %} is-recommended{% endif %}">
+  {% if m.label == 'base' and not active %}
+    <span class="model-card-rec-badge">▸ recommended</span>
+  {% endif %}
   <header class="model-card-head">
     <h3 class="model-card-label">{{ m.label }}</h3>
     <code class="model-card-file">{{ m.name }}</code>

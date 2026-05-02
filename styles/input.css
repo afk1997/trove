@@ -1150,10 +1150,11 @@
     padding: 12px 16px;
   }
   .clip-picker { flex: 1; }
+}
 
-  /* === TRANSCRIBE SETUP / SETTINGS PAGE ====== */
+/* === TRANSCRIBE SETUP / SETTINGS PAGE ====== */
 
-  .setup-page {
+.setup-page {
     max-width: 920px;
     margin: 0 auto;
     padding: 48px 32px 80px;
@@ -1201,6 +1202,26 @@
     color: var(--teal);
     opacity: 0.65;
     margin: 0 0 24px;
+  }
+  .setup-section-sub strong {
+    color: var(--orange);
+    font-weight: 600;
+    opacity: 1;
+  }
+  .setup-step-tag {
+    display: inline-block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--light);
+    background: var(--orange);
+    border: 1.5px solid var(--teal);
+    padding: 3px 10px;
+    transform: rotate(-1deg);
+    box-shadow: 2px 2px 0 var(--teal);
+    margin: 0 0 14px;
   }
 
   /* Machine probe */
@@ -1264,6 +1285,30 @@
   .model-card.is-active {
     border-color: var(--forest);
     box-shadow: 4px 4px 0 var(--forest);
+  }
+  .model-card.is-recommended {
+    border-color: var(--orange);
+    border-width: 2px;
+    box-shadow: 5px 5px 0 var(--orange);
+  }
+  .model-card.is-recommended:hover {
+    box-shadow: 6px 6px 0 var(--orange);
+  }
+  .model-card-rec-badge {
+    position: absolute;
+    top: -10px; left: 16px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--light);
+    background: var(--orange);
+    border: 1.5px solid var(--teal);
+    padding: 3px 10px;
+    transform: rotate(-1.5deg);
+    box-shadow: 2px 2px 0 var(--teal);
+    z-index: 1;
   }
   .model-card-head {
     display: flex; justify-content: space-between; align-items: baseline;
@@ -1386,8 +1431,7 @@
   .setup-back {
     display: inline-block; margin-top: 32px;
     font-family: 'IBM Plex Mono', monospace; font-size: 11px;
-    letter-spacing: 0.18em; text-transform: uppercase;
-    color: var(--teal); text-decoration: underline; text-decoration-style: dashed;
-  }
-  .setup-back:hover { color: var(--orange); }
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--teal); text-decoration: underline; text-decoration-style: dashed;
 }
+.setup-back:hover { color: var(--orange); }
