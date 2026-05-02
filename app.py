@@ -290,9 +290,10 @@ def create_app() -> Flask:
             job = job_manager.get(job_id)
             rendered.append(render_template("partials/card.html", card=_card_view(job)))
 
-        # afterbegin prepends each fragment in turn — to keep the user's
-        # paste order top-to-bottom we have to render bottom-to-top.
-        return "".join(reversed(rendered))
+        # htmx ``afterbegin`` inserts the response HTML verbatim at the
+        # start of the target — the first fragment in the response ends
+        # up at the top of the queue. So we keep paste order as-is.
+        return "".join(rendered)
 
     @app.get("/api/status-card/<job_id>")
     @token_required
