@@ -1064,6 +1064,7 @@
       position: sticky; top: 110px; z-index: 27;
       display: flex; gap: 12px; align-items: center;
       padding: 8px 12px;
+      /* sticky establishes a containing block for the absolute .t-video-panel */
       background: color-mix(in srgb, var(--cream) 85%, white);
       border: 1px solid color-mix(in srgb, var(--teal) 16%, transparent);
       border-radius: 8px;
@@ -1122,6 +1123,37 @@
     .t-pb-speed-btn:hover:not(.is-active) {
       background: color-mix(in srgb, var(--orange) 10%, transparent);
       color: var(--orange);
+    }
+    .t-pb-video-toggle {
+      flex: 0 0 auto;
+      appearance: none; background: transparent;
+      border: 1px solid color-mix(in srgb, var(--teal) 18%, transparent);
+      width: 26px; height: 26px;
+      font-size: 14px; line-height: 1;
+      color: var(--teal);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .t-pb-video-toggle:hover {
+      background: color-mix(in srgb, var(--orange) 10%, transparent);
+      color: var(--orange);
+    }
+    .t-pb-video-toggle.is-active {
+      background: var(--teal); color: var(--cream); border-color: var(--teal);
+    }
+    .t-video-panel {
+      position: absolute;
+      top: calc(100% + 6px); right: 12px;
+      width: min(360px, 60vw);
+      background: black;
+      border: 1px solid color-mix(in srgb, var(--teal) 24%, transparent);
+      border-radius: 8px;
+      box-shadow: 0 6px 24px color-mix(in srgb, black 22%, transparent);
+      overflow: hidden;
+      z-index: 28;
+    }
+    .t-video-panel video {
+      display: block; width: 100%; height: auto;
     }
 
     /* --- Zone D: document body --- */

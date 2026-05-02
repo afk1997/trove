@@ -18,6 +18,9 @@ downloads/
 # Whisper model cache (downloaded at runtime by setup wizard)
 models/
 
+# Paste-buffer artifacts dropped into the chat by the IDE
+attached_assets/Pasted-*.txt
+
 # IDE
 .vscode/
 .idea/

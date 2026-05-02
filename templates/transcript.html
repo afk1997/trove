@@ -86,7 +86,11 @@
     {% if is_audio %}
       <audio id="t-player" preload="metadata" src="{{ media_url }}"></audio>
     {% else %}
-      <video id="t-player" preload="metadata" src="{{ media_url }}" hidden></video>
+      <button type="button" class="t-pb-video-toggle" id="t-pb-video-toggle"
+              aria-label="show / hide video" aria-pressed="false" title="show / hide video">▢</button>
+      <div class="t-video-panel" id="t-video-panel" hidden>
+        <video id="t-player" preload="metadata" src="{{ media_url }}" playsinline></video>
+      </div>
     {% endif %}
   </div>
 
@@ -105,6 +109,8 @@
     <button type="button" data-act="bookmark" role="menuitem">bookmark</button>
     <button type="button" data-act="note" role="menuitem">add note</button>
     <button type="button" data-act="export-selection" role="menuitem">export selection</button>
+    <button type="button" data-act="revert-paragraph" role="menuitem"
+            title="restore this paragraph from the last successfully-saved snapshot — use if contenteditable broke">revert paragraph</button>
   </div>
 
   <div class="t-toast-stack" id="t-toast-stack" aria-live="polite" aria-atomic="true"></div>
@@ -515,13 +521,36 @@
     });
   });
 
-  // ===== DOUBLE-CLICK WORD -> SEEK ========================================
+  // ===== DOUBLE-CLICK + ALT-CLICK WORD -> SEEK ============================
+  function seekToWord(w) {
+    const t = parseFloat(w.dataset.start);
+    if (!isNaN(t)) { player.currentTime = t; player.play().catch(function () {}); }
+  }
   bodyEl.addEventListener('dblclick', function (e) {
     const w = e.target.closest('.word');
     if (!w) return;
-    const t = parseFloat(w.dataset.start);
-    if (!isNaN(t)) { player.currentTime = t; player.play().catch(function () {}); }
+    seekToWord(w);
   });
+  // Alt/Option+click is a faster single-click seek alternative for power users.
+  bodyEl.addEventListener('click', function (e) {
+    if (!e.altKey) return;
+    const w = e.target.closest('.word');
+    if (!w) return;
+    e.preventDefault();
+    seekToWord(w);
+  });
+
+  // ===== VIDEO EXPAND TOGGLE (video transcripts only) =====================
+  const vidToggle = document.getElementById('t-pb-video-toggle');
+  const vidPanel = document.getElementById('t-video-panel');
+  if (vidToggle && vidPanel) {
+    vidToggle.addEventListener('click', function () {
+      const willShow = vidPanel.hidden;
+      vidPanel.hidden = !willShow;
+      vidToggle.setAttribute('aria-pressed', willShow ? 'true' : 'false');
+      vidToggle.classList.toggle('is-active', willShow);
+    });
+  }
 
   // ===== ACTIVE WORD / SEGMENT TRACKING + FOLLOW-ALONG ====================
   let activeIdx = -1;
@@ -817,8 +846,53 @@
       doNotePrompt(r.start);
     } else if (act === 'export-selection') {
       doExportSelection(r);
+    } else if (act === 'revert-paragraph') {
+      doRevertParagraphAtSelection(r);
     }
     if (selToolbar) selToolbar.hidden = true;
+  }
+  // Escape hatch for contenteditable damage (cross-span deletes, weird paste,
+  // browser quirks). Rebuilds the .t-seg-body from lastKnown[segIdx], which
+  // is the last fully-saved snapshot of word state.
+  function doRevertParagraphAtSelection(r) {
+    const startWord = bodyEl.querySelector('.word[data-idx="' + r.start + '"]');
+    if (!startWord) return;
+    const seg = startWord.closest('.t-seg-body');
+    if (!seg) return;
+    const segIdx = parseInt(seg.dataset.segIdx, 10);
+    revertSegment(segIdx);
+  }
+  function revertSegment(segIdx) {
+    const snap = lastKnown[segIdx];
+    if (!snap || !snap.length) { toast('nothing to revert', 'error'); return; }
+    const seg = bodyEl.querySelector('.t-seg-body[data-seg-idx="' + segIdx + '"]');
+    if (!seg) return;
+    // Cancel any pending diff for this segment so the rebuild doesn't trigger a save.
+    if (diffTimers[segIdx]) { clearTimeout(diffTimers[segIdx]); delete diffTimers[segIdx]; }
+    // Preserve original word data attrs by cloning the existing spans where
+    // possible (keeps data-start / data-end / highlight marks intact for words
+    // that still exist; rebuilds plain spans for any that were destroyed).
+    const existing = {};
+    seg.querySelectorAll('.word').forEach(function (w) {
+      existing[parseInt(w.dataset.idx, 10)] = w;
+    });
+    seg.innerHTML = '';
+    snap.forEach(function (entry, i) {
+      const orig = existing[entry.idx];
+      let span;
+      if (orig) {
+        span = orig.cloneNode(false);
+        span.textContent = entry.w;
+      } else {
+        span = document.createElement('span');
+        span.className = 'word';
+        span.dataset.idx = String(entry.idx);
+        span.textContent = entry.w;
+      }
+      seg.appendChild(span);
+      if (i < snap.length - 1) seg.appendChild(document.createTextNode(' '));
+    });
+    toast('paragraph reverted to last saved');
   }
 
   // ===== HIGHLIGHTS =======================================================
