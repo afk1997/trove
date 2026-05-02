@@ -158,7 +158,12 @@ def test_write_artifacts_produces_all_four_files(tmp_path):
              "words": [{"w": "second", "start": 1.0, "end": 1.5},
                        {"w": "segment", "start": 1.5, "end": 2.0}]},
         ],
-        words=[],
+        words=[
+            {"w": "hello", "start": 0.0, "end": 0.5},
+            {"w": "world", "start": 0.5, "end": 1.0},
+            {"w": "second", "start": 1.0, "end": 1.5},
+            {"w": "segment", "start": 1.5, "end": 2.0},
+        ],
         error=None,
     )
     transcriber.write_artifacts(res, str(tmp_path / "abc"))

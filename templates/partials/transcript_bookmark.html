@@ -1,0 +1,8 @@
+{# One bookmark <li> (used inline + as POST/PATCH responses). #}
+<li class="t-bookmark" data-bm-id="{{ bm.id }}" data-time="{{ bm.time }}">
+  <button type="button" class="t-bm-time" data-time="{{ bm.time }}" title="seek">
+    {{ "%d:%02d" | format((bm.time | int) // 60, (bm.time | int) % 60) }}
+  </button>
+  <span class="t-bm-note" data-bm-id="{{ bm.id }}" tabindex="0" role="button" title="edit">{{ bm.note or "(empty)" }}</span>
+  <button type="button" class="t-bm-del" data-bm-id="{{ bm.id }}" aria-label="delete bookmark" title="delete">×</button>
+</li>

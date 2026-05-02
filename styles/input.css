@@ -1043,7 +1043,369 @@
     border-color: var(--teal);
   }
   .word:focus-visible { outline: 2px dashed var(--orange); outline-offset: 2px; }
+  .word.is-edited {
+    color: var(--teal);
+    border-bottom: 1px dashed var(--orange);
+  }
+  .word.is-deleted { display: none; }
+  .word-editor {
+    font-family: inherit;
+    font-size: inherit;
+    color: var(--teal);
+    background: var(--light);
+    border: 1px solid var(--teal);
+    border-radius: 2px;
+    padding: 0 4px;
+    margin: 0;
+    width: auto;
+    min-width: 4ch;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(255, 87, 40, 0.2);
+  }
+  .word-editor:focus { box-shadow: 0 0 0 2px var(--orange); }
 
+  /* Toast — auto-save feedback (bottom-right). */
+  .t-toast-stack {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 9999;
+    pointer-events: none;
+  }
+  .t-toast {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--light);
+    background: var(--teal);
+    padding: 8px 14px;
+    border: 1px solid var(--teal);
+    border-radius: 2px;
+    box-shadow: 2px 2px 0 var(--teal);
+    animation: toast-fade 2s ease-out forwards;
+  }
+  .t-toast.is-error {
+    background: var(--orange);
+    border-color: var(--orange);
+    box-shadow: 2px 2px 0 var(--orange);
+  }
+  @keyframes toast-fade {
+    0%   { opacity: 0; transform: translateY(8px); }
+    15%  { opacity: 1; transform: translateY(0); }
+    80%  { opacity: 1; }
+    100% { opacity: 0; transform: translateY(-4px); }
+  }
+
+  /* Hover handles — singleton floating bar above the focused word. */
+  .word-handles {
+    position: absolute;
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    background: var(--teal);
+    border-radius: 2px;
+    z-index: 60;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 12px;
+    line-height: 1;
+    box-shadow: 1px 1px 0 var(--teal);
+    animation: handles-in 100ms ease-out;
+  }
+  .word-handles button {
+    appearance: none;
+    background: var(--light);
+    color: var(--teal);
+    border: none;
+    padding: 3px 7px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: inherit;
+    border-radius: 2px;
+    line-height: 1;
+  }
+  .word-handles button:hover {
+    background: var(--orange);
+    color: var(--light);
+  }
+  @keyframes handles-in {
+    from { opacity: 0; transform: translateY(2px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ----- Edited badge (TR-E12) -------------------------------------- */
+  .t-edited-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    background: var(--orange);
+    color: var(--light);
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    border-radius: 2px;
+    text-transform: uppercase;
+  }
+
+  /* ----- Speed row (TR-E8) ------------------------------------------ */
+  .t-speed-row {
+    display: flex;
+    gap: 0;
+    margin-top: 8px;
+    border: 1px solid var(--teal);
+    border-radius: 2px;
+    overflow: hidden;
+    width: fit-content;
+  }
+  .t-speed {
+    appearance: none;
+    background: transparent;
+    color: var(--teal);
+    border: none;
+    border-right: 1px solid var(--teal);
+    padding: 6px 12px;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 12px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .t-speed:last-child { border-right: none; }
+  .t-speed:hover { background: rgba(26, 53, 64, 0.08); }
+  .t-speed.is-active { background: var(--teal); color: var(--light); }
+
+  /* ----- Help button (TR-E9) ---------------------------------------- */
+  .t-help-btn {
+    margin-left: auto;
+    appearance: none;
+    background: transparent;
+    color: var(--teal);
+    border: 1px solid var(--teal);
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-weight: 600;
+    line-height: 1;
+  }
+  .t-help-btn:hover { background: var(--teal); color: var(--light); }
+  .t-shortcut-help .t-shortcuts {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 13px;
+  }
+  .t-shortcut-help .t-shortcuts li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .t-shortcut-help .t-shortcuts code {
+    display: inline-block;
+    padding: 2px 6px;
+    background: rgba(26, 53, 64, 0.08);
+    border-radius: 2px;
+    color: var(--teal);
+    font-size: 12px;
+    min-width: 36px;
+    text-align: center;
+  }
+
+  /* ----- Find / replace bar (TR-E7) --------------------------------- */
+  .t-find-replace {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+    padding: 8px;
+    background: var(--cream);
+    border: 1px dashed var(--teal);
+    border-radius: 2px;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 13px;
+  }
+  .t-find-replace input[type="text"] {
+    flex: 1 1 0;
+    min-width: 0;
+    border: 1px solid var(--teal);
+    background: var(--light);
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: inherit;
+    color: var(--teal);
+    border-radius: 2px;
+  }
+  .t-find-replace .t-fr-case { display: inline-flex; align-items: center; gap: 4px; color: var(--teal); }
+  .t-find-replace button {
+    appearance: none;
+    background: var(--teal);
+    color: var(--light);
+    border: none;
+    padding: 5px 10px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    border-radius: 2px;
+  }
+  .t-find-replace button:hover { background: var(--orange); }
+  .t-find-replace #t-fr-close {
+    background: transparent;
+    color: var(--teal);
+    padding: 2px 8px;
+    font-size: 16px;
+    line-height: 1;
+  }
+  .t-find-replace #t-fr-close:hover { color: var(--orange); }
+
+  /* ----- Speaker tag (TR-E10) --------------------------------------- */
+  .t-speaker-tag {
+    display: inline-block;
+    margin-right: 8px;
+    padding: 1px 8px;
+    background: transparent;
+    color: var(--teal);
+    border: 1px dashed var(--teal);
+    border-radius: 2px;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    line-height: 1.4;
+    vertical-align: 2px;
+    user-select: none;
+  }
+  .t-speaker-tag.is-set {
+    background: var(--teal);
+    color: var(--light);
+    border-style: solid;
+  }
+  .t-speaker-tag:hover { background: var(--orange); color: var(--light); border-color: var(--orange); }
+  .t-speaker-input { font-size: 11px; min-width: 80px; }
+
+  /* ----- Bookmarks aside (TR-E11) ----------------------------------- */
+  .t-bookmarks {
+    grid-area: bookmarks;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    background: var(--cream);
+    border: 1px solid var(--teal);
+    border-radius: 2px;
+    align-self: start;
+    min-width: 0;
+  }
+  .t-bookmarks-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px dashed var(--teal);
+    padding-bottom: 6px;
+  }
+  .t-bookmarks-title {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--teal);
+  }
+  .t-bm-add {
+    appearance: none;
+    background: var(--teal);
+    color: var(--light);
+    border: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .t-bm-add:hover { background: var(--orange); }
+  .t-bookmarks-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+  .t-bookmark {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 6px;
+    align-items: center;
+    padding: 4px 6px;
+    background: var(--light);
+    border: 1px solid var(--teal);
+    border-radius: 2px;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 12px;
+  }
+  .t-bm-time {
+    appearance: none;
+    background: transparent;
+    color: var(--teal);
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: 600;
+  }
+  .t-bm-time:hover { color: var(--orange); }
+  .t-bm-note {
+    color: var(--teal);
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .t-bm-del {
+    appearance: none;
+    background: transparent;
+    color: var(--teal);
+    border: none;
+    padding: 0 4px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .t-bm-del:hover { color: var(--orange); }
+  .t-bookmarks-empty {
+    margin: 0;
+    color: var(--teal);
+    opacity: 0.7;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 11px;
+    font-style: italic;
+  }
+
+}
+
+/* Outside @layer to override grid template only when wide enough. */
+@media (min-width: 1100px) {
+  .transcript-grid {
+    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) minmax(220px, 280px);
+    grid-template-areas: "media body bookmarks";
+  }
+  .transcript-media { grid-area: media; }
+  .transcript-body  { grid-area: body; }
+  .t-bookmarks      { grid-area: bookmarks; }
+}
+@media (max-width: 1099px) {
+  .t-bookmarks { margin-top: 16px; }
 }
 
 /* ============================================================

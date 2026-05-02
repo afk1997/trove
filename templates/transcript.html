@@ -22,6 +22,7 @@
       {{ "%d:%02d" | format((data.duration | int) // 60, (data.duration | int) % 60) }}
       <span class="sep">·</span> {{ (data.language or "—") | upper }}
       <span class="sep">·</span> {{ tj.model_used }}
+      {% if was_edited %}<span class="sep">·</span> <span class="t-edited-badge" id="t-edited-badge">edited</span>{% endif %}
     </p>
   </div>
 
@@ -32,9 +33,24 @@
       {% else %}
         <video id="t-player" controls preload="metadata" src="{{ media_url }}"></video>
       {% endif %}
+      <div class="t-speed-row" role="group" aria-label="playback speed">
+        <button type="button" class="t-speed" data-rate="0.5">0.5×</button>
+        <button type="button" class="t-speed" data-rate="1">1×</button>
+        <button type="button" class="t-speed" data-rate="1.25">1.25×</button>
+        <button type="button" class="t-speed" data-rate="1.5">1.5×</button>
+        <button type="button" class="t-speed" data-rate="2">2×</button>
+      </div>
     </aside>
 
     <section class="transcript-body">
+      <div class="t-find-replace" id="t-fr-bar" hidden>
+        <input type="text" id="t-fr-find" placeholder="find…" autocomplete="off">
+        <input type="text" id="t-fr-replace" placeholder="replace…" autocomplete="off">
+        <label class="t-fr-case"><input type="checkbox" id="t-fr-case"> case</label>
+        <button type="button" id="t-fr-go">replace all</button>
+        <button type="button" id="t-fr-close" aria-label="close" title="close (Esc)">×</button>
+      </div>
+
       <div class="transcript-search-row">
         <label for="t-search" class="sr-only">Search transcript</label>
         <input id="t-search" type="search" placeholder="⚲ search transcript…" autocomplete="off">
@@ -45,52 +61,112 @@
           <input type="checkbox" id="t-follow" checked>
           <span>follow along</span>
         </label>
+        <button type="button" id="t-help-btn" class="t-help-btn" aria-label="keyboard shortcuts" title="shortcuts (?)">?</button>
       </div>
 
       <div class="transcript-text" id="t-text">
-        {% for seg in data.segments %}
-          <p class="t-segment" data-seg-start="{{ seg.start }}">
-            {% for w in seg.words %}<span class="word"
-                  tabindex="0"
-                  role="button"
-                  data-start="{{ w.start }}"
-                  data-end="{{ w.end }}"
-                  aria-label="word at {{ '%.2f' | format(w.start) }} seconds">{{ w.w }}</span>{% if not loop.last %} {% endif %}{% endfor %}
-          </p>
-        {% endfor %}
+        {% for seg in data.segments %}{% set seg_idx = loop.index0 %}{% include "partials/transcript_segment.html" %}{% endfor %}
       </div>
     </section>
+
+    <aside class="t-bookmarks" id="t-bookmarks" aria-label="bookmarks">
+      <div class="t-bookmarks-head">
+        <span class="t-bookmarks-title">bookmarks</span>
+        <button type="button" id="t-bm-add" class="t-bm-add" title="add bookmark (Cmd+B)" aria-label="add bookmark">+</button>
+      </div>
+      <ul class="t-bookmarks-list" id="t-bookmarks-list">
+        {% for bm in data.bookmarks or [] %}{% include "partials/transcript_bookmark.html" %}{% endfor %}
+      </ul>
+      {% if not (data.bookmarks or []) %}<p class="t-bookmarks-empty" id="t-bookmarks-empty">no bookmarks yet · press ⌘B</p>{% endif %}
+    </aside>
+  </div>
+
+  <div class="t-toast-stack" id="t-toast-stack" aria-live="polite" aria-atomic="true"></div>
+
+  <div class="modal-overlay" id="t-help-modal" hidden role="dialog" aria-label="keyboard shortcuts">
+    <div class="modal t-shortcut-help" role="document">
+      <div class="modal-head">
+        <span class="modal-stamp">HELP / 02</span>
+        <h2>keyboard shortcuts</h2>
+      </div>
+      <div class="modal-body">
+        <ul class="t-shortcuts">
+          <li><code>Space</code> / <code>K</code> <span>play / pause</span></li>
+          <li><code>J</code> / <code>L</code> <span>back / forward 5s</span></li>
+          <li><code>,</code> / <code>.</code> <span>speed −/+ 0.25</span></li>
+          <li><code>⌘F</code> <span>focus search</span></li>
+          <li><code>⌘⇧F</code> <span>find &amp; replace</span></li>
+          <li><code>⌘B</code> <span>bookmark current time</span></li>
+          <li><code>?</code> <span>open this dialog</span></li>
+          <li><code>Esc</code> <span>close / cancel</span></li>
+        </ul>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="t-help-close" class="modal-primary">got it</button>
+      </div>
+    </div>
   </div>
 
 </main>
 
 <script nonce="{{ g.csp_nonce }}">
   (function () {
+    const root = document.querySelector('.transcript-page');
+    const transcribeId = root ? root.dataset.transcribeId : '';
     const player = document.getElementById('t-player');
-    const words = Array.from(document.querySelectorAll('.transcript-text .word'));
+    const textRoot = document.getElementById('t-text');
     const search = document.getElementById('t-search');
     const prev = document.getElementById('t-prev');
     const next = document.getElementById('t-next');
     const countEl = document.getElementById('t-search-count');
     const followToggle = document.getElementById('t-follow');
+    const toastStack = document.getElementById('t-toast-stack');
 
-    if (!player || !words.length) return;
+    function liveWords() {
+      return Array.from(textRoot.querySelectorAll('.word:not(.is-deleted)'));
+    }
 
-    // ----- Click-to-seek -----------------------------------------------
-    words.forEach(function (w) {
-      const seek = function () {
-        player.currentTime = parseFloat(w.dataset.start) || 0;
+    if (!player || !textRoot) return;
+
+    // ----- Toast (auto-save feedback) ----------------------------------
+    function toast(msg, kind) {
+      if (!toastStack) return;
+      const el = document.createElement('div');
+      el.className = 't-toast' + (kind === 'error' ? ' is-error' : '');
+      el.textContent = msg;
+      toastStack.appendChild(el);
+      // Remove after the CSS animation completes (matches 2s keyframe).
+      setTimeout(function () { el.remove(); }, 2100);
+    }
+
+    // ----- Double-click-to-seek (single click reserved for editing) ----
+    textRoot.addEventListener('dblclick', function (e) {
+      const w = e.target.closest('.word');
+      if (!w || w.classList.contains('is-editing')) return;
+      const t = parseFloat(w.dataset.start);
+      if (!isNaN(t)) {
+        player.currentTime = t;
         player.play().catch(function () {});
-      };
-      w.addEventListener('click', seek);
-      w.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); seek(); }
-      });
+      }
+    });
+    // Keyboard activation (Enter/Space) on a focused word also seeks; the
+    // edit flow takes over on a plain click.
+    textRoot.addEventListener('keydown', function (e) {
+      const w = e.target.closest('.word');
+      if (!w || w.classList.contains('is-editing')) return;
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        const t = parseFloat(w.dataset.start);
+        if (!isNaN(t)) {
+          player.currentTime = t;
+          player.play().catch(function () {});
+        }
+      }
     });
 
-    // ----- Active-word highlight (binary search) -----------------------
+    // ----- Active-word highlight (binary search over live words) -------
     let activeIdx = -1;
-    function findActive(t) {
+    function findActive(t, words) {
       let lo = 0, hi = words.length - 1, found = -1;
       while (lo <= hi) {
         const mid = (lo + hi) >> 1;
@@ -100,11 +176,15 @@
       return found;
     }
     player.addEventListener('timeupdate', function () {
-      const idx = findActive(player.currentTime);
+      const words = liveWords();
+      const idx = findActive(player.currentTime, words);
       if (idx === activeIdx) return;
-      if (activeIdx >= 0) words[activeIdx].classList.remove('is-active');
+      // Clear all is-active to be safe (DOM may have shifted after edits).
+      textRoot.querySelectorAll('.word.is-active').forEach(function (el) {
+        el.classList.remove('is-active');
+      });
       activeIdx = idx;
-      if (idx >= 0) {
+      if (idx >= 0 && words[idx]) {
         words[idx].classList.add('is-active');
         if (followToggle && followToggle.checked) {
           words[idx].scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -112,12 +192,14 @@
       }
     });
 
-    // ----- Search -------------------------------------------------------
+    // ----- Search ------------------------------------------------------
     let matchIdxs = [];
     let currentMatch = -1;
 
     function clearMatches() {
-      words.forEach(function (w) { w.classList.remove('is-match', 'is-current-match'); });
+      textRoot.querySelectorAll('.word.is-match, .word.is-current-match').forEach(function (w) {
+        w.classList.remove('is-match', 'is-current-match');
+      });
       matchIdxs = [];
       currentMatch = -1;
       countEl.textContent = '';
@@ -127,6 +209,7 @@
       const q = (search.value || '').trim().toLowerCase();
       clearMatches();
       if (!q) return;
+      const words = liveWords();
       words.forEach(function (w, i) {
         if (w.textContent.toLowerCase().indexOf(q) !== -1) {
           w.classList.add('is-match');
@@ -141,11 +224,14 @@
     }
 
     function markCurrent() {
+      const words = liveWords();
       words.forEach(function (w) { w.classList.remove('is-current-match'); });
       if (currentMatch >= 0 && currentMatch < matchIdxs.length) {
         const w = words[matchIdxs[currentMatch]];
-        w.classList.add('is-current-match');
-        w.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        if (w) {
+          w.classList.add('is-current-match');
+          w.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
       }
     }
 
@@ -153,8 +239,9 @@
       if (!matchIdxs.length) return;
       currentMatch = (currentMatch + delta + matchIdxs.length) % matchIdxs.length;
       markCurrent();
+      const words = liveWords();
       const w = words[matchIdxs[currentMatch]];
-      player.currentTime = parseFloat(w.dataset.start) || 0;
+      if (w) player.currentTime = parseFloat(w.dataset.start) || 0;
     }
 
     if (search) search.addEventListener('input', applySearch);
@@ -163,10 +250,627 @@
 
     // Cmd/Ctrl + F focuses our search instead of browser find
     document.addEventListener('keydown', function (e) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f' && !e.shiftKey) {
+        // Don't hijack while editing a word.
+        if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('word-editor')) return;
         e.preventDefault(); search && search.focus();
       } else if (e.key === 'Enter' && document.activeElement === search) {
         e.preventDefault(); step(e.shiftKey ? -1 : +1);
+      }
+    });
+
+    // === EDIT ==========================================================
+    // Single-click a word -> swap span for an inline <input>; blur/Enter
+    // commits via PATCH and replaces the input with the server-rendered
+    // word fragment. Esc reverts. Tab moves to the next word.
+
+    let editingSpan = null;
+
+    function beginEdit(span) {
+      if (!span || span.classList.contains('is-editing') || span.classList.contains('is-deleted')) return;
+      const original = span.textContent;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = original;
+      input.className = 'word-editor';
+      input.dataset.idx = span.dataset.idx;
+      input.dataset.original = original;
+      // Preserve timestamps + edited flag so cancel() can rebuild a fully
+      // functional span (click-to-seek + edited highlight survive Esc).
+      input.dataset.start = span.dataset.start || '';
+      input.dataset.end = span.dataset.end || '';
+      input.dataset.edited = span.classList.contains('is-edited') ? '1' : '';
+      input.size = Math.max(2, original.length + 1);
+      input.setAttribute('aria-label', 'edit word');
+      span.replaceWith(input);
+      editingSpan = input;
+      input.focus();
+      input.select();
+    }
+
+    async function commit(input, opts) {
+      opts = opts || {};
+      const idx = input.dataset.idx;
+      const newText = input.value;
+      const original = input.dataset.original;
+      // No change → just restore the original span (no PATCH).
+      if (newText === original) {
+        cancel(input);
+        return;
+      }
+      const body = new URLSearchParams();
+      body.set('w', newText);
+      try {
+        const res = await fetch('/api/transcribe/' + transcribeId + '/word/' + idx, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: body.toString(),
+        });
+        if (res.status === 409) {
+          toast("couldn't save · reload to refresh", 'error');
+          cancel(input);
+          return;
+        }
+        if (!res.ok) {
+          toast("couldn't save · " + res.status, 'error');
+          cancel(input);
+          return;
+        }
+        const html = await res.text();
+        const wrap = document.createElement('div');
+        wrap.innerHTML = html.trim();
+        const newSpan = wrap.firstElementChild;
+        input.replaceWith(newSpan);
+        editingSpan = null;
+        toast('saved · just now');
+        if (opts.advance) {
+          // Focus the next non-deleted word for fluent Tab+edit.
+          const all = liveWords();
+          const here = all.indexOf(newSpan);
+          const target = here >= 0 ? all[here + 1] : null;
+          if (target) {
+            target.focus();
+            beginEdit(target);
+          }
+        }
+      } catch (err) {
+        toast("couldn't save · network", 'error');
+        cancel(input);
+      }
+    }
+
+    function cancel(input) {
+      const span = document.createElement('span');
+      let cls = 'word';
+      if (input.dataset.edited) cls += ' is-edited';
+      span.className = cls;
+      span.tabIndex = 0;
+      span.setAttribute('role', 'button');
+      span.dataset.idx = input.dataset.idx;
+      if (input.dataset.start) span.dataset.start = input.dataset.start;
+      if (input.dataset.end) span.dataset.end = input.dataset.end;
+      span.textContent = input.dataset.original;
+      input.replaceWith(span);
+      editingSpan = null;
+    }
+
+    textRoot.addEventListener('click', function (e) {
+      const w = e.target.closest('.word');
+      if (!w) return;
+      // Ignore clicks while we're already editing.
+      if (e.target.closest('.word-editor')) return;
+      e.preventDefault();
+      beginEdit(w);
+    });
+
+    document.addEventListener('keydown', function (e) {
+      const ed = document.activeElement;
+      if (!ed || !ed.classList || !ed.classList.contains('word-editor')) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commit(ed, { advance: false });
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        commit(ed, { advance: true });
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        cancel(ed);
+      }
+    });
+
+    // Blur is the catch-all auto-save (covers click-elsewhere).
+    textRoot.addEventListener('focusout', function (e) {
+      const ed = e.target;
+      if (!ed || !ed.classList || !ed.classList.contains('word-editor')) return;
+      // Defer one tick so a Tab keydown handler runs first if applicable.
+      setTimeout(function () {
+        if (document.body.contains(ed) && document.activeElement !== ed) {
+          commit(ed, { advance: false });
+        }
+      }, 0);
+    });
+
+    // === HANDLES (TR-E6) ==============================================
+    // A singleton floating bar with ✕ → + actions per word. Appears on
+    // hover, hides shortly after the pointer leaves both the word and
+    // the bar. Reduced-motion users get an instant reveal (no animation).
+
+    const handles = document.createElement('div');
+    handles.className = 'word-handles';
+    handles.setAttribute('role', 'toolbar');
+    handles.setAttribute('aria-label', 'word actions');
+    handles.innerHTML = ''
+      + '<button type="button" data-act="del" title="delete word" aria-label="delete">x</button>'
+      + '<button type="button" data-act="merge" title="merge with next" aria-label="merge with next">→</button>'
+      + '<button type="button" data-act="insert" title="insert after" aria-label="insert after">+</button>';
+    handles.style.display = 'none';
+    document.body.appendChild(handles);
+
+    let handleTarget = null;
+    let hideTimer = null;
+
+    function placeHandles(span) {
+      const r = span.getBoundingClientRect();
+      handles.style.left = (r.left + window.scrollX) + 'px';
+      handles.style.top = (r.top + window.scrollY - 28) + 'px';
+      handles.style.display = 'flex';
+      handleTarget = span;
+    }
+    function scheduleHide() {
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(function () {
+        if (!handles.matches(':hover') && (!handleTarget || !handleTarget.matches(':hover'))) {
+          handles.style.display = 'none';
+          handleTarget = null;
+        }
+      }, 180);
+    }
+    function hideHandlesNow() {
+      clearTimeout(hideTimer);
+      handles.style.display = 'none';
+      handleTarget = null;
+    }
+
+    textRoot.addEventListener('mouseover', function (e) {
+      const w = e.target.closest('.word');
+      if (!w || w.classList.contains('is-deleted')) return;
+      clearTimeout(hideTimer);
+      placeHandles(w);
+    });
+    textRoot.addEventListener('mouseout', function (e) {
+      if (!e.target.closest('.word')) return;
+      scheduleHide();
+    });
+    handles.addEventListener('mouseenter', function () { clearTimeout(hideTimer); });
+    handles.addEventListener('mouseleave', scheduleHide);
+
+    async function callJSON(url, method) {
+      try {
+        const res = await fetch(url, { method: method });
+        return res;
+      } catch (err) {
+        return null;
+      }
+    }
+    function spanFromHTML(html) {
+      const wrap = document.createElement('div');
+      wrap.innerHTML = (html || '').trim();
+      return wrap.firstElementChild;
+    }
+
+    async function doDelete(span) {
+      const idx = span.dataset.idx;
+      hideHandlesNow();
+      const res = await callJSON('/api/transcribe/' + transcribeId + '/word/' + idx, 'DELETE');
+      if (!res || !res.ok) { toast("couldn't delete · " + (res ? res.status : 'network'), 'error'); return; }
+      const newSpan = spanFromHTML(await res.text());
+      if (newSpan) span.replaceWith(newSpan);
+      toast('deleted · just now');
+    }
+
+    async function doMerge(span) {
+      const idx = span.dataset.idx;
+      hideHandlesNow();
+      const res = await callJSON('/api/transcribe/' + transcribeId + '/word/' + idx + '/merge-next', 'POST');
+      if (!res || !res.ok) { toast("couldn't merge · " + (res ? res.status : 'network'), 'error'); return; }
+      const html = (await res.text()).trim();
+      const wrap = document.createElement('div');
+      wrap.innerHTML = html;
+      // Response: anchor span (primary swap) + peer span (hx-swap-oob).
+      Array.from(wrap.children).forEach(function (s) {
+        const i = s.dataset.idx;
+        const target = textRoot.querySelector('.word[data-idx="' + i + '"]');
+        s.removeAttribute('hx-swap-oob');
+        if (target) target.replaceWith(s);
+      });
+      toast('merged · just now');
+    }
+
+    function doInsertPrompt(anchor) {
+      const idx = anchor.dataset.idx;
+      hideHandlesNow();
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'word-editor';
+      input.placeholder = 'insert…';
+      input.size = 6;
+      input.setAttribute('aria-label', 'insert word after');
+      // Insert with a leading space so the new word renders separated.
+      const space = document.createTextNode(' ');
+      anchor.parentNode.insertBefore(space, anchor.nextSibling);
+      anchor.parentNode.insertBefore(input, space.nextSibling);
+      input.focus();
+
+      function cleanup() {
+        if (input.parentNode) input.remove();
+        if (space.parentNode) space.remove();
+      }
+      let committed = false;
+      async function commitInsert() {
+        if (committed) return; committed = true;
+        const text = input.value.trim();
+        if (!text) { cleanup(); return; }
+        const body = new URLSearchParams(); body.set('w', text);
+        try {
+          const res = await fetch('/api/transcribe/' + transcribeId + '/word/' + idx + '/insert-after', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString(),
+          });
+          if (!res.ok) { toast("couldn't insert · " + res.status, 'error'); cleanup(); return; }
+          const newSpan = spanFromHTML(await res.text());
+          if (newSpan) input.replaceWith(newSpan);
+          toast('inserted · just now');
+        } catch (err) {
+          toast("couldn't insert · network", 'error');
+          cleanup();
+        }
+      }
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') { e.preventDefault(); cleanup(); }
+        else if (e.key === 'Enter') { e.preventDefault(); commitInsert(); }
+      });
+      input.addEventListener('blur', function () {
+        setTimeout(function () { if (document.body.contains(input) && !committed) commitInsert(); }, 80);
+      });
+    }
+
+    handles.addEventListener('click', function (e) {
+      const btn = e.target.closest('button');
+      if (!btn || !handleTarget) return;
+      const target = handleTarget;
+      const act = btn.dataset.act;
+      if (act === 'del') doDelete(target);
+      else if (act === 'merge') doMerge(target);
+      else if (act === 'insert') doInsertPrompt(target);
+    });
+
+    // === EDITED BADGE (TR-E12) ========================================
+    function markEdited() {
+      if (document.getElementById('t-edited-badge')) return;
+      const submeta = document.querySelector('.transcript-submeta');
+      if (!submeta) return;
+      submeta.insertAdjacentHTML(
+        'beforeend',
+        ' <span class="sep">·</span> <span class="t-edited-badge" id="t-edited-badge">edited</span>'
+      );
+    }
+
+    // === SPEED (TR-E8) ================================================
+    const speedBtns = Array.from(document.querySelectorAll('.t-speed'));
+    const STORED_RATE = 'trove.playbackRate';
+    function applyRate(r) {
+      const rate = parseFloat(r) || 1;
+      try { if (player) player.playbackRate = rate; } catch (_) {}
+      speedBtns.forEach(function (b) {
+        b.classList.toggle('is-active', parseFloat(b.dataset.rate) === rate);
+      });
+      try { localStorage.setItem(STORED_RATE, String(rate)); } catch (_) {}
+    }
+    speedBtns.forEach(function (b) {
+      b.addEventListener('click', function () { applyRate(b.dataset.rate); });
+    });
+    try {
+      const stored = localStorage.getItem(STORED_RATE);
+      applyRate(stored ? parseFloat(stored) : 1);
+    } catch (_) { applyRate(1); }
+
+    // === SPEAKER (TR-E10) =============================================
+    function renderSpeakerTag(tag, value) {
+      tag.classList.toggle('is-set', !!value);
+      tag.textContent = value || '+ speaker';
+    }
+    function beginSpeakerEdit(tag) {
+      if (tag.querySelector('input')) return;
+      const segIdx = tag.dataset.segIdx;
+      const original = tag.classList.contains('is-set') ? tag.textContent.trim() : '';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = original;
+      input.placeholder = 'speaker';
+      input.className = 'word-editor t-speaker-input';
+      input.size = Math.max(8, original.length + 2);
+      input.setAttribute('aria-label', 'speaker name');
+      tag.replaceChildren(input);
+      input.focus();
+      input.select();
+      let committed = false;
+      async function commitSpeaker() {
+        if (committed) return; committed = true;
+        const next = input.value.trim();
+        if (next === original) { renderSpeakerTag(tag, original); return; }
+        try {
+          const body = new URLSearchParams();
+          body.set('speaker', next);
+          body.set('propagate', '1');
+          const res = await fetch('/api/transcribe/' + transcribeId + '/segment/' + segIdx + '/speaker', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString(),
+          });
+          if (!res.ok) { toast("couldn't update speaker · " + res.status, 'error'); renderSpeakerTag(tag, original); return; }
+          const html = (await res.text()).trim();
+          if (!html) { renderSpeakerTag(tag, next); return; }
+          const wrap = document.createElement('div');
+          wrap.innerHTML = html;
+          Array.from(wrap.children).forEach(function (newSeg) {
+            const i = newSeg.dataset.segIdx;
+            const target = textRoot.querySelector('.t-segment[data-seg-idx="' + i + '"]');
+            if (target) target.replaceWith(newSeg);
+          });
+          toast('speaker · just now');
+          markEdited();
+        } catch (err) {
+          toast("couldn't update speaker · network", 'error');
+          renderSpeakerTag(tag, original);
+        }
+      }
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); commitSpeaker(); }
+        else if (e.key === 'Escape') { e.preventDefault(); committed = true; renderSpeakerTag(tag, original); }
+      });
+      input.addEventListener('blur', function () {
+        setTimeout(function () { if (!committed) commitSpeaker(); }, 80);
+      });
+    }
+    textRoot.addEventListener('click', function (e) {
+      const tag = e.target.closest('.t-speaker-tag');
+      if (!tag) return;
+      e.preventDefault();
+      e.stopPropagation();
+      beginSpeakerEdit(tag);
+    });
+
+    // === FIND/REPLACE (TR-E7) =========================================
+    const frBar = document.getElementById('t-fr-bar');
+    const frFind = document.getElementById('t-fr-find');
+    const frReplace = document.getElementById('t-fr-replace');
+    const frCase = document.getElementById('t-fr-case');
+    const frGo = document.getElementById('t-fr-go');
+    const frClose = document.getElementById('t-fr-close');
+    let lastReplace = null;
+    function openFR() { if (frBar) { frBar.hidden = false; frFind.focus(); frFind.select(); } }
+    function closeFR() { if (frBar) frBar.hidden = true; }
+    async function runFR(find, replace, caseSensitive) {
+      if (!find) return;
+      const body = new URLSearchParams();
+      body.set('find', find);
+      body.set('replace', replace);
+      if (caseSensitive) body.set('case_sensitive', '1');
+      try {
+        const res = await fetch('/api/transcribe/' + transcribeId + '/find-replace', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: body.toString(),
+        });
+        if (!res.ok) { toast("couldn't replace · " + res.status, 'error'); return; }
+        const data = await res.json();
+        Object.keys(data.fragments || {}).forEach(function (idx) {
+          const target = textRoot.querySelector('.word[data-idx="' + idx + '"]');
+          if (!target) return;
+          const wrap = document.createElement('div');
+          wrap.innerHTML = data.fragments[idx];
+          if (wrap.firstElementChild) target.replaceWith(wrap.firstElementChild);
+        });
+        toast(data.count + ' replaced · just now');
+        if (data.count > 0) {
+          lastReplace = { find: find, replace: replace, case: !!caseSensitive };
+          markEdited();
+        }
+      } catch (err) {
+        toast("couldn't replace · network", 'error');
+      }
+    }
+    if (frGo) frGo.addEventListener('click', function () {
+      runFR(frFind.value, frReplace.value, frCase && frCase.checked);
+    });
+    if (frClose) frClose.addEventListener('click', closeFR);
+    function frKeyHandler(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        runFR(frFind.value, frReplace.value, frCase && frCase.checked);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeFR();
+      }
+    }
+    if (frFind) frFind.addEventListener('keydown', frKeyHandler);
+    if (frReplace) frReplace.addEventListener('keydown', frKeyHandler);
+
+    // === BOOKMARKS (TR-E11) ===========================================
+    const bmList = document.getElementById('t-bookmarks-list');
+    const bmAdd = document.getElementById('t-bm-add');
+    function clearBmEmpty() {
+      const e = document.getElementById('t-bookmarks-empty');
+      if (e) e.remove();
+    }
+    function insertBookmarkSorted(li) {
+      if (!bmList || !li) return;
+      const t = parseFloat(li.dataset.time) || 0;
+      const items = Array.from(bmList.querySelectorAll('.t-bookmark'));
+      let inserted = false;
+      for (const it of items) {
+        if ((parseFloat(it.dataset.time) || 0) > t) {
+          bmList.insertBefore(li, it);
+          inserted = true;
+          break;
+        }
+      }
+      if (!inserted) bmList.appendChild(li);
+    }
+    async function createBookmark(time, note) {
+      const body = new URLSearchParams();
+      body.set('time', String(time || 0));
+      body.set('note', note || '');
+      try {
+        const res = await fetch('/api/transcribe/' + transcribeId + '/bookmark', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: body.toString(),
+        });
+        if (!res.ok) { toast("couldn't bookmark · " + res.status, 'error'); return; }
+        const wrap = document.createElement('div');
+        wrap.innerHTML = (await res.text()).trim();
+        const li = wrap.firstElementChild;
+        insertBookmarkSorted(li);
+        clearBmEmpty();
+        toast('bookmark · just now');
+        markEdited();
+      } catch (err) { toast("couldn't bookmark · network", 'error'); }
+    }
+    function bmShortcut() {
+      const t = (player && !isNaN(player.currentTime)) ? player.currentTime : 0;
+      createBookmark(t, '');
+    }
+    if (bmAdd) bmAdd.addEventListener('click', bmShortcut);
+    if (bmList) {
+      bmList.addEventListener('click', async function (e) {
+        const seekBtn = e.target.closest('.t-bm-time');
+        const delBtn = e.target.closest('.t-bm-del');
+        if (seekBtn) {
+          const t = parseFloat(seekBtn.dataset.time);
+          if (!isNaN(t) && player) {
+            player.currentTime = t;
+            if (player.paused) player.play().catch(function () {});
+          }
+        } else if (delBtn) {
+          const id = delBtn.dataset.bmId;
+          const li = delBtn.closest('.t-bookmark');
+          try {
+            const res = await fetch('/api/transcribe/' + transcribeId + '/bookmark/' + id, { method: 'DELETE' });
+            if (!res.ok) { toast("couldn't delete · " + res.status, 'error'); return; }
+            if (li) li.remove();
+            toast('deleted · just now');
+          } catch (err) { toast("couldn't delete · network", 'error'); }
+        }
+      });
+      bmList.addEventListener('dblclick', function (e) {
+        const noteSpan = e.target.closest('.t-bm-note');
+        if (noteSpan) beginBookmarkNoteEdit(noteSpan);
+      });
+    }
+    function beginBookmarkNoteEdit(span) {
+      const id = span.dataset.bmId;
+      const original = span.textContent === '(empty)' ? '' : span.textContent;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = original;
+      input.className = 'word-editor';
+      span.replaceWith(input);
+      input.focus();
+      input.select();
+      let committed = false;
+      function restore() {
+        const newSpan = document.createElement('span');
+        newSpan.className = 't-bm-note';
+        newSpan.dataset.bmId = id;
+        newSpan.tabIndex = 0;
+        newSpan.setAttribute('role', 'button');
+        newSpan.textContent = original || '(empty)';
+        if (input.parentNode) input.replaceWith(newSpan);
+      }
+      async function commit() {
+        if (committed) return; committed = true;
+        const next = input.value;
+        try {
+          const body = new URLSearchParams();
+          body.set('note', next);
+          const res = await fetch('/api/transcribe/' + transcribeId + '/bookmark/' + id, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString(),
+          });
+          if (!res.ok) { toast("couldn't update · " + res.status, 'error'); restore(); return; }
+          const wrap = document.createElement('div');
+          wrap.innerHTML = (await res.text()).trim();
+          const newLi = wrap.firstElementChild;
+          const oldLi = bmList.querySelector('.t-bookmark[data-bm-id="' + id + '"]');
+          if (newLi && oldLi) oldLi.replaceWith(newLi);
+          else if (newLi) bmList.appendChild(newLi);
+          toast('updated · just now');
+        } catch (err) {
+          toast("couldn't update · network", 'error');
+          restore();
+        }
+      }
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); committed = true; restore(); }
+      });
+      input.addEventListener('blur', function () {
+        setTimeout(function () { if (!committed) commit(); }, 80);
+      });
+    }
+
+    // === KEYBOARD (TR-E9) =============================================
+    const helpModal = document.getElementById('t-help-modal');
+    const helpBtn = document.getElementById('t-help-btn');
+    const helpClose = document.getElementById('t-help-close');
+    function openHelp() { if (helpModal) helpModal.hidden = false; }
+    function closeHelp() { if (helpModal) helpModal.hidden = true; }
+    if (helpBtn) helpBtn.addEventListener('click', openHelp);
+    if (helpClose) helpClose.addEventListener('click', closeHelp);
+    if (helpModal) helpModal.addEventListener('click', function (e) {
+      if (e.target === helpModal) closeHelp();
+    });
+    function isFormEl(el) {
+      if (!el) return false;
+      const t = el.tagName;
+      return t === 'INPUT' || t === 'TEXTAREA' || el.isContentEditable;
+    }
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && helpModal && !helpModal.hidden) {
+        e.preventDefault(); closeHelp(); return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        if (frBar && frBar.hidden) openFR(); else closeFR();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault(); bmShortcut(); return;
+      }
+      if (isFormEl(document.activeElement)) return;
+      const k = e.key.toLowerCase();
+      if (e.key === ' ' || k === 'k') {
+        e.preventDefault();
+        if (!player) return;
+        if (player.paused) player.play().catch(function () {}); else player.pause();
+      } else if (k === 'j') {
+        e.preventDefault();
+        if (player) player.currentTime = Math.max(0, player.currentTime - 5);
+      } else if (k === 'l') {
+        e.preventDefault();
+        if (player) player.currentTime = (player.currentTime || 0) + 5;
+      } else if (e.key === ',') {
+        e.preventDefault();
+        applyRate(Math.max(0.25, (player && player.playbackRate ? player.playbackRate : 1) - 0.25));
+      } else if (e.key === '.') {
+        e.preventDefault();
+        applyRate(Math.min(4, (player && player.playbackRate ? player.playbackRate : 1) + 0.25));
+      } else if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
+        e.preventDefault();
+        openHelp();
       }
     });
   })();

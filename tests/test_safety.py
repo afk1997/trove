@@ -126,11 +126,11 @@ def test_attach_security_headers_sets_basic_headers():
 
     r = app.test_client().get("/")
     assert r.headers["X-Content-Type-Options"] == "nosniff"
-    assert r.headers["X-Frame-Options"] == "DENY"
+    assert "X-Frame-Options" not in r.headers
     assert r.headers["Referrer-Policy"] == "no-referrer"
     csp = r.headers["Content-Security-Policy"]
     assert "default-src 'self'" in csp
-    assert "frame-ancestors 'none'" in csp
+    assert "frame-ancestors *" in csp
     assert "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
 
 

@@ -224,7 +224,8 @@ def test_transcript_page_renders(client, tmp_path, monkeypatch):
         "segments": [{"start": 0.0, "end": 1.0, "text": "hello world",
                       "words": [{"w": "hello", "start": 0.0, "end": 0.5},
                                 {"w": "world", "start": 0.5, "end": 1.0}]}],
-        "words": [],
+        "words": [{"w": "hello", "start": 0.0, "end": 0.5},
+                  {"w": "world", "start": 0.5, "end": 1.0}],
     }))
 
     monkeypatch.setattr("app.DOWNLOAD_DIR", download_dir)

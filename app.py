@@ -21,6 +21,8 @@ import machine
 from threading import Thread, Lock
 import transcribe_jobs
 import transcriber
+import transcript_io
+import time as _time
 
 
 DOWNLOAD_DIR = Path(__file__).parent / "downloads"
@@ -524,23 +526,47 @@ def create_app() -> Flask:
         download_name = sanitize_filename(parent.title or "transcript", "." + fmt)
         return send_file(path, mimetype=mime, as_attachment=True, download_name=download_name)
 
-    @app.get("/transcript/<transcribe_id>")
-    def transcript_view(transcribe_id):
+    def _resolve_transcribe_paths(transcribe_id):
+        """Return (tj, parent, base_path) or (None, None, None) for a 404."""
         tj = transcribe_manager.get(transcribe_id)
         if tj is None or tj.status != transcribe_jobs.TranscribeStatus.DONE:
-            return abort(404)
+            return None, None, None
         parent = job_manager.get(tj.parent_job_id)
         if parent is None or not parent.file_path:
-            return abort(404)
-
+            return None, None, None
         base = os.path.splitext(parent.file_path)[0]
-        words_json_path = base + ".words.json"
-        if not os.path.exists(words_json_path):
+        if not os.path.exists(base + ".words.json"):
+            return None, None, None
+        return tj, parent, base
+
+    def _save_after_edit(data, base):
+        """Persist + regenerate exports after any transcript mutation."""
+        data["edited_at"] = _time.time()
+        transcript_io.save(base + ".words.json", data)
+        transcript_io.regenerate_artifacts(data, base)
+
+    # Per-transcript lock: serialize concurrent mutations so the
+    # read-modify-write sequence (load → apply → save) cannot interleave
+    # and lose updates between rapid edits from the same browser.
+    _txn_locks_guard = Lock()
+    _txn_locks: dict[str, Lock] = {}
+
+    def _txn_lock(base: str) -> Lock:
+        with _txn_locks_guard:
+            lock = _txn_locks.get(base)
+            if lock is None:
+                lock = Lock()
+                _txn_locks[base] = lock
+            return lock
+
+    @app.get("/transcript/<transcribe_id>")
+    def transcript_view(transcribe_id):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
             return abort(404)
 
-        import json as _j
-        with open(words_json_path) as f:
-            data = _j.load(f)
+        # transcript_io.load auto-migrates v1 files to v2 + writes a backup.
+        data = transcript_io.load(base + ".words.json")
 
         ext = os.path.splitext(parent.file_path)[1].lower()
         is_audio = ext in {".mp3", ".m4a", ".ogg", ".wav", ".flac"}
@@ -559,7 +585,199 @@ def create_app() -> Flask:
             data=data,
             is_audio=is_audio,
             media_url=media_url,
+            was_edited=bool(data.get("edited_at")),
         )
+
+    # ----- transcript word edit endpoints (TR-E4) -------------------------
+
+    @app.patch("/api/transcribe/<transcribe_id>/word/<int:idx>")
+    @token_required
+    def api_word_set_text(transcribe_id, idx):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        text = request.form.get("w")
+        if text is None:
+            return jsonify({"error": "missing w"}), 400
+        with _txn_lock(base):
+            try:
+                data = transcript_io.load(base + ".words.json")
+                word = transcript_io.apply_word_op(data, idx, "set_text", w=text)
+            except transcript_io.WordOpError as e:
+                return jsonify({"error": str(e)}), 400
+            _save_after_edit(data, base)
+        return render_template("partials/transcript_word.html", w=word)
+
+    @app.delete("/api/transcribe/<transcribe_id>/word/<int:idx>")
+    @token_required
+    def api_word_delete(transcribe_id, idx):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        with _txn_lock(base):
+            try:
+                data = transcript_io.load(base + ".words.json")
+                word = transcript_io.apply_word_op(data, idx, "delete")
+            except transcript_io.WordOpError as e:
+                return jsonify({"error": str(e)}), 400
+            _save_after_edit(data, base)
+        return render_template("partials/transcript_word.html", w=word)
+
+    @app.post("/api/transcribe/<transcribe_id>/word/<int:idx>/insert-after")
+    @token_required
+    def api_word_insert_after(transcribe_id, idx):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        text = request.form.get("w", "")
+        with _txn_lock(base):
+            try:
+                data = transcript_io.load(base + ".words.json")
+                new_word = transcript_io.apply_word_op(data, idx, "insert_after", w=text)
+            except transcript_io.WordOpError as e:
+                return jsonify({"error": str(e)}), 400
+            _save_after_edit(data, base)
+        return render_template("partials/transcript_word.html", w=new_word)
+
+    @app.post("/api/transcribe/<transcribe_id>/word/<int:idx>/merge-next")
+    @token_required
+    def api_word_merge_next(transcribe_id, idx):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        with _txn_lock(base):
+            try:
+                data = transcript_io.load(base + ".words.json")
+                # Capture the peer idx BEFORE the op marks it deleted, so we
+                # know which span to swap out-of-band.
+                peer_idx = transcript_io.next_visible_word_idx(data, idx)
+                anchor = transcript_io.apply_word_op(data, idx, "merge_next")
+            except transcript_io.WordOpError as e:
+                return jsonify({"error": str(e)}), 400
+            _save_after_edit(data, base)
+            peer = data["words"][peer_idx] if peer_idx is not None else None
+        primary = render_template("partials/transcript_word.html", w=anchor)
+        if peer is None:
+            return primary
+        oob = render_template("partials/transcript_word.html", w=peer, oob=True)
+        return primary + oob
+
+    # ----- find / replace (TR-E7) -----------------------------------------
+
+    @app.post("/api/transcribe/<transcribe_id>/find-replace")
+    @token_required
+    def api_find_replace(transcribe_id):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        find = request.form.get("find", "")
+        replace = request.form.get("replace", "")
+        case_sensitive = request.form.get("case_sensitive") in ("1", "on", "true")
+        if not find:
+            return jsonify({"error": "missing find"}), 400
+        with _txn_lock(base):
+            data = transcript_io.load(base + ".words.json")
+            result = transcript_io.find_replace(
+                data, find, replace, case_sensitive=case_sensitive,
+            )
+            if result["count"]:
+                _save_after_edit(data, base)
+            fragments = {
+                str(idx): render_template(
+                    "partials/transcript_word.html", w=data["words"][idx],
+                )
+                for idx in result["indices"]
+            }
+        return jsonify({"count": result["count"], "fragments": fragments})
+
+    # ----- speaker labels (TR-E10) ----------------------------------------
+
+    @app.patch("/api/transcribe/<transcribe_id>/segment/<int:seg_idx>/speaker")
+    @token_required
+    def api_segment_speaker(transcribe_id, seg_idx):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        speaker = (request.form.get("speaker") or "").strip() or None
+        propagate = request.form.get("propagate", "1") in ("1", "on", "true")
+        with _txn_lock(base):
+            data = transcript_io.load(base + ".words.json")
+            try:
+                changed = transcript_io.apply_speaker(
+                    data, seg_idx, speaker, propagate=propagate,
+                )
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            if changed:
+                _save_after_edit(data, base)
+            # Return one segment fragment per changed seg, concatenated.
+            # The JS layer swaps each in by data-seg-idx selector.
+            out_parts = []
+            for idx in changed:
+                out_parts.append(render_template(
+                    "partials/transcript_segment.html",
+                    seg=data["segments"][idx],
+                    seg_idx=idx,
+                    data=data,
+                ))
+        return "".join(out_parts) or ("", 200)
+
+    # ----- bookmarks (TR-E11) ---------------------------------------------
+
+    @app.post("/api/transcribe/<transcribe_id>/bookmark")
+    @token_required
+    def api_bookmark_create(transcribe_id):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        time_str = request.form.get("time")
+        if time_str is None:
+            return jsonify({"error": "missing time"}), 400
+        try:
+            time_f = float(time_str)
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid time"}), 400
+        note = request.form.get("note", "")
+        with _txn_lock(base):
+            data = transcript_io.load(base + ".words.json")
+            bm = transcript_io.add_bookmark(data, time_f, note)
+            _save_after_edit(data, base)
+        return render_template("partials/transcript_bookmark.html", bm=bm)
+
+    @app.patch("/api/transcribe/<transcribe_id>/bookmark/<bm_id>")
+    @token_required
+    def api_bookmark_update(transcribe_id, bm_id):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        kwargs = {}
+        if "time" in request.form:
+            try:
+                kwargs["time"] = float(request.form["time"])
+            except (TypeError, ValueError):
+                return jsonify({"error": "invalid time"}), 400
+        if "note" in request.form:
+            kwargs["note"] = request.form["note"]
+        with _txn_lock(base):
+            data = transcript_io.load(base + ".words.json")
+            bm = transcript_io.update_bookmark(data, bm_id, **kwargs)
+            if bm is None:
+                return "", 404
+            _save_after_edit(data, base)
+        return render_template("partials/transcript_bookmark.html", bm=bm)
+
+    @app.delete("/api/transcribe/<transcribe_id>/bookmark/<bm_id>")
+    @token_required
+    def api_bookmark_delete(transcribe_id, bm_id):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        with _txn_lock(base):
+            data = transcript_io.load(base + ".words.json")
+            if not transcript_io.delete_bookmark(data, bm_id):
+                return "", 404
+            _save_after_edit(data, base)
+        return "", 200
 
     # --- helpers -----------------------------------------------------------
 

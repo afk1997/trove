@@ -157,45 +157,54 @@ def _build_segment(words: list[dict]) -> dict:
 
 
 def write_artifacts(result: TranscriptResult, base_path: str) -> None:
-    """Write .txt / .srt / .vtt / .words.json next to the media file.
+    """Write .words.json (schema v2) + .txt / .srt / .vtt next to the media.
 
     base_path is the path WITHOUT extension, e.g. 'downloads/abc123'.
+
+    The .words.json is emitted directly in schema v2 so freshly-transcribed
+    files don't have to be migrated on first open. .txt/.srt/.vtt are
+    rendered via ``transcript_io.regenerate_artifacts`` so the same code
+    path is used after edits.
     """
-    # .txt — segments joined
-    txt = "\n\n".join(s["text"] for s in result.segments)
-    with open(base_path + ".txt", "w") as f:
-        f.write(txt + ("\n" if txt and not txt.endswith("\n") else ""))
+    import transcript_io as _tio
 
-    # .words.json — for the viewer page
-    with open(base_path + ".words.json", "w") as f:
-        _json.dump({
-            "language": result.language,
-            "duration": result.duration,
-            "segments": result.segments,
-            "words": result.words,
-        }, f)
+    # Build flat words array with editor metadata.
+    flat_words = []
+    for i, w in enumerate(result.words):
+        flat_words.append({
+            "idx": i,
+            "w": w["w"],
+            "original_w": w["w"],
+            "start": w["start"],
+            "end": w["end"],
+            "edited": False,
+            "deleted": False,
+        })
 
-    # .srt
-    with open(base_path + ".srt", "w") as f:
-        for i, seg in enumerate(result.segments, 1):
-            f.write(f"{i}\n")
-            f.write(f"{_format_timestamp(seg['start'], srt=True)} --> {_format_timestamp(seg['end'], srt=True)}\n")
-            f.write(seg["text"] + "\n\n")
+    # Build segments referencing words by idx (positional cursor matches the
+    # grouping done above by run_transcribe).
+    cursor = 0
+    v2_segments = []
+    for seg in result.segments:
+        n = len(seg.get("words", []))
+        v2_segments.append({
+            "start": seg["start"],
+            "end": seg["end"],
+            "text": seg.get("text", ""),
+            "word_idxs": list(range(cursor, cursor + n)),
+            "speaker": None,
+        })
+        cursor += n
 
-    # .vtt
-    with open(base_path + ".vtt", "w") as f:
-        f.write("WEBVTT\n\n")
-        for seg in result.segments:
-            f.write(f"{_format_timestamp(seg['start'], srt=False)} --> {_format_timestamp(seg['end'], srt=False)}\n")
-            f.write(seg["text"] + "\n\n")
+    data = {
+        "schema_version": _tio.SCHEMA_VERSION,
+        "language": result.language,
+        "duration": result.duration,
+        "edited_at": None,
+        "words": flat_words,
+        "segments": v2_segments,
+        "bookmarks": [],
+    }
 
-
-def _format_timestamp(seconds: float, *, srt: bool) -> str:
-    """SRT uses , as decimal sep; VTT uses ."""
-    if seconds < 0: seconds = 0
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    ms = int((seconds - int(seconds)) * 1000)
-    sep = "," if srt else "."
-    return f"{h:02d}:{m:02d}:{s:02d}{sep}{ms:03d}"
+    _tio.save(base_path + ".words.json", data)
+    _tio.regenerate_artifacts(data, base_path)

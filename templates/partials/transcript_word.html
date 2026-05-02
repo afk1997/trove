@@ -1,0 +1,18 @@
+{# One transcript word, used both inside transcript.html and as the
+   fragment returned by /api/transcribe/<id>/word/<idx> endpoints.
+
+   Variables:
+     w        -- the word dict (idx, w, original_w, start, end, edited, deleted)
+     oob      -- (optional) when truthy, render with hx-swap-oob="outerHTML"
+                 so callers can update multiple spans in one response.
+#}
+{%- set _deleted = w.deleted -%}
+<span class="word
+      {%- if w.edited %} is-edited{% endif -%}
+      {%- if _deleted %} is-deleted{% endif %}"
+      {% if oob %}hx-swap-oob="outerHTML"{% endif %}
+      tabindex="{% if _deleted %}-1{% else %}0{% endif %}"
+      data-idx="{{ w.idx }}"
+      data-start="{{ w.start }}"
+      data-end="{{ w.end }}"
+      {% if _deleted %}hidden aria-hidden="true"{% else %}role="button" aria-label="word at {{ '%.2f' | format(w.start|float) }} seconds"{% endif %}>{{ w.w }}</span>
