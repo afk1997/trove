@@ -1,23 +1,53 @@
+import io
 import subprocess
 import pytest
 from pathlib import Path
 import transcriber
 
 
+class _FakePopen:
+    """Stand-in for subprocess.Popen — drives extract_audio's wait loop
+    without actually shelling out. Set ``returncode`` and ``stderr_text``
+    before the wait loop runs."""
+    def __init__(self, argv, **kw):
+        self.argv = argv
+        self.returncode = 0
+        self.stderr_text = ""
+        self._killed = False
+        self._waited = False
+
+    def wait(self, timeout=None):
+        # Simulate "process finished immediately" so the wait loop exits
+        # on its first iteration.
+        if self._killed:
+            return self.returncode
+        self._waited = True
+        return self.returncode
+
+    def kill(self):
+        self._killed = True
+        self.returncode = -9
+
+    @property
+    def stderr(self):
+        return io.StringIO(self.stderr_text)
+
+    @property
+    def stdout(self):
+        return io.StringIO("")
+
+
 def test_extract_audio_invokes_ffmpeg(monkeypatch, tmp_path):
     """extract_audio() shells out to ffmpeg with the right args."""
     captured = {}
 
-    def fake_run(argv, **kw):
+    def fake_popen(argv, **kw):
         captured["argv"] = argv
         # Fake a successful ffmpeg run: create the output file
         Path(argv[-1]).write_bytes(b"WAV-FAKE")
-        class _R:
-            returncode = 0
-            stderr = ""
-        return _R()
+        return _FakePopen(argv, **kw)
 
-    monkeypatch.setattr(transcriber.subprocess, "run", fake_run)
+    monkeypatch.setattr(transcriber.subprocess, "Popen", fake_popen)
 
     src = tmp_path / "in.mp4"
     src.write_bytes(b"x")
@@ -36,15 +66,69 @@ def test_extract_audio_invokes_ffmpeg(monkeypatch, tmp_path):
 
 
 def test_extract_audio_raises_on_ffmpeg_failure(monkeypatch, tmp_path):
-    def fake_run(argv, **kw):
-        class _R:
-            returncode = 1
-            stderr = "no such file"
-        return _R()
-    monkeypatch.setattr(transcriber.subprocess, "run", fake_run)
+    def fake_popen(argv, **kw):
+        p = _FakePopen(argv, **kw)
+        p.returncode = 1
+        p.stderr_text = "no such file"
+        return p
+    monkeypatch.setattr(transcriber.subprocess, "Popen", fake_popen)
 
     with pytest.raises(RuntimeError, match="ffmpeg"):
         transcriber.extract_audio(str(tmp_path / "in.mp4"), str(tmp_path / "out.wav"))
+
+
+def test_extract_audio_cancellable_mid_extract(monkeypatch, tmp_path):
+    """When cancel_check returns True during the wait loop, the ffmpeg
+    process is killed and extract_audio raises RuntimeError('cancelled')."""
+    class _SlowPopen(_FakePopen):
+        def __init__(self, argv, **kw):
+            super().__init__(argv, **kw)
+            self._waits = 0
+        def wait(self, timeout=None):
+            if self._killed:
+                return -9
+            self._waits += 1
+            # Never naturally exits — force the loop to consult cancel_check.
+            raise subprocess.TimeoutExpired(self.argv, timeout)
+
+    monkeypatch.setattr(transcriber.subprocess, "Popen", _SlowPopen)
+
+    # cancel_check returns True on second poll
+    polls = [False, True, True]
+    def _cancel():
+        return polls.pop(0) if polls else True
+
+    with pytest.raises(RuntimeError, match="cancelled"):
+        transcriber.extract_audio(
+            str(tmp_path / "in.mp4"),
+            str(tmp_path / "out.wav"),
+            cancel_check=_cancel,
+        )
+
+
+def test_extract_audio_register_proc_called(monkeypatch, tmp_path):
+    """register_proc is invoked with the live Popen so the caller can
+    stash it on a job for external kill."""
+    captured = {}
+
+    def fake_popen(argv, **kw):
+        Path(argv[-1]).write_bytes(b"WAV-FAKE")
+        return _FakePopen(argv, **kw)
+    monkeypatch.setattr(transcriber.subprocess, "Popen", fake_popen)
+
+    seen = []
+    def _reg(p):
+        seen.append(p)
+
+    transcriber.extract_audio(
+        str(tmp_path / "in.mp4"),
+        str(tmp_path / "out.wav"),
+        register_proc=_reg,
+    )
+    # First call: live Popen. Second call (in finally): None to clear.
+    assert len(seen) == 2
+    assert seen[0] is not None
+    assert seen[1] is None
 
 
 def test_run_transcribe_returns_structured_result(monkeypatch, tmp_path):

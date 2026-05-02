@@ -96,6 +96,63 @@ def test_ttl_sweep_removes_old_done_jobs(tmp_path):
     jm.shutdown()
 
 
+def test_ttl_sweep_keep_predicate_preserves_jobs(tmp_path):
+    """When keep_predicate(j) returns True, the job survives the sweep
+    AND its last_accessed is bumped so it doesn't immediately re-qualify.
+    This is what protects parent media jobs that still have a completed
+    transcribe child from being unlinked."""
+    jm = JobManager(max_workers=1, ttl_seconds=0)
+
+    def work(job: Job):
+        f = tmp_path / f"{job.id}.bin"
+        f.write_bytes(b"x")
+        job.file_path = str(f)
+
+    # Two terminal jobs; predicate keeps one of them.
+    jid_keep = jm.submit(target=work, title="keep", url="https://k")
+    jid_drop = jm.submit(target=work, title="drop", url="https://d")
+    for _ in range(50):
+        if (jm.get(jid_keep).status == JobStatus.DONE
+                and jm.get(jid_drop).status == JobStatus.DONE):
+            break
+        time.sleep(0.05)
+
+    removed = jm.sweep(keep_predicate=lambda j: j.id == jid_keep)
+    assert removed == 1
+    assert jm.get(jid_keep) is not None
+    assert jm.get(jid_drop) is None
+    # File for kept job survives; file for dropped job is gone.
+    assert (tmp_path / f"{jid_keep}.bin").exists()
+    assert not (tmp_path / f"{jid_drop}.bin").exists()
+    # Subsequent sweep with NO predicate should still drop the kept job
+    # (it remains terminal + last_accessed was bumped, but ttl=0 means
+    # any non-zero age qualifies — confirm it's still sweepable).
+    time.sleep(0.01)
+    jm.sweep()
+    assert jm.get(jid_keep) is None
+    jm.shutdown()
+
+
+def test_ttl_sweep_keep_predicate_is_called_per_job(tmp_path):
+    """The predicate sees every candidate job (so the app can walk all
+    transcribe children for a parent, not just the most recent)."""
+    jm = JobManager(max_workers=1, ttl_seconds=0)
+
+    def work(job: Job):
+        pass  # no file
+
+    ids = [jm.submit(target=work, title=f"t{i}", url=f"https://x{i}") for i in range(3)]
+    for _ in range(50):
+        if all(jm.get(j).status == JobStatus.DONE for j in ids):
+            break
+        time.sleep(0.05)
+
+    seen = []
+    jm.sweep(keep_predicate=lambda j: seen.append(j.id) or False)
+    assert sorted(seen) == sorted(ids)
+    jm.shutdown()
+
+
 def test_job_status_includes_paused():
     assert JobStatus.PAUSED.value == "paused"
 

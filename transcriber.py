@@ -1,13 +1,32 @@
 """Transcriber — pywhispercpp wrapper + ffmpeg audio extraction.
 
-extract_audio(src, dst): ffmpeg → 16 kHz mono WAV
+extract_audio(src, dst, ...): ffmpeg → 16 kHz mono WAV. Spawned via
+    Popen so a long extract can be killed mid-flight when the user
+    cancels — see the ``register_proc`` and ``cancel_check`` hooks.
 run_transcribe(audio_path, model_path, ...): pywhispercpp run; returns
-    {"language", "duration", "segments", "words"} dict.
+    a ``TranscriptResult``. Cancellation is best-effort during the
+    inference C call (whisper.cpp emits per-segment callbacks; we use
+    them to poll the cancel flag and abort early).
 """
 from __future__ import annotations
 import os
 import subprocess
+import tempfile
+import time
 from dataclasses import dataclass
+
+
+# Default ffmpeg timeout. The old 10-minute limit failed multi-hour
+# lectures even though transcoding is faster than realtime — a 90-min
+# source on a slow box can blow past 600s. 4h covers any practical
+# input; an env override remains for unusual cases.
+EXTRACT_AUDIO_TIMEOUT = int(os.environ.get("TROVE_EXTRACT_AUDIO_TIMEOUT", "14400"))
+
+
+class _Cancelled(Exception):
+    """Internal sentinel raised from the whisper segment callback to abort
+    inference early when the user cancels mid-transcribe. Caught and
+    converted to a cancelled TranscriptResult by ``run_transcribe``."""
 
 
 @dataclass
@@ -19,10 +38,33 @@ class TranscriptResult:
     error: str | None = None
 
 
-def extract_audio(src: str, dst: str) -> None:
+def extract_audio(
+    src: str,
+    dst: str,
+    *,
+    cancel_check=None,
+    register_proc=None,
+    timeout: int | None = None,
+) -> None:
     """Extract audio from src into 16 kHz mono PCM WAV at dst.
 
-    Raises RuntimeError if ffmpeg exits non-zero.
+    Raises RuntimeError if ffmpeg exits non-zero (other than via cancel).
+
+    Cancellation
+    ------------
+    The previous implementation called ``subprocess.run`` and held the
+    GIL for up to the full timeout — so a user clicking "cancel" while
+    ffmpeg was running just got an unfulfilled promise. Now ffmpeg is
+    spawned via ``Popen``; the caller may pass:
+
+      * ``cancel_check() -> bool`` — polled every 0.25s. When True, the
+        ffmpeg process is killed and the (presumed-empty/partial) output
+        WAV is unlinked.
+      * ``register_proc(proc)`` — called once with the live ``Popen`` so
+        the caller can stash the handle on a job for external kill.
+
+    On cancel, raises ``RuntimeError("cancelled")``; the caller is
+    expected to treat that as a clean abort, not a transcribe error.
     """
     argv = [
         "ffmpeg", "-y", "-i", src,
@@ -31,9 +73,88 @@ def extract_audio(src: str, dst: str) -> None:
         "-c:a", "pcm_s16le",
         dst,
     ]
-    proc = subprocess.run(argv, capture_output=True, text=True, timeout=600)
-    if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed (rc={proc.returncode}): {proc.stderr.strip()[-300:]}")
+    eff_timeout = timeout if timeout is not None else EXTRACT_AUDIO_TIMEOUT
+    # ffmpeg writes ongoing progress to stderr — if we left stderr on a
+    # PIPE without draining it, the OS pipe buffer fills (~64KB) and
+    # ffmpeg blocks forever on its next write while we sit in wait().
+    # Discard stdout entirely; capture stderr to a tempfile so we can
+    # still surface it on failure. (Reader thread would also work, but
+    # tempfile is simpler and ffmpeg never reads back from the file.)
+    stderr_fd, stderr_path = tempfile.mkstemp(prefix="trove-ffmpeg-stderr.", suffix=".log")
+    proc = None
+    rc = None
+    try:
+        proc = subprocess.Popen(
+            argv,
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_fd,
+        )
+        # The Popen has dup'd the fd; close our handle so stderr is flushed
+        # cleanly when ffmpeg exits.
+        os.close(stderr_fd)
+        stderr_fd = -1
+
+        if register_proc is not None:
+            try:
+                register_proc(proc)
+            except Exception:
+                # registration failure must never prevent the extract running
+                pass
+
+        started = time.monotonic()
+        while True:
+            try:
+                rc = proc.wait(timeout=0.25)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            if cancel_check is not None:
+                try:
+                    cancelled = bool(cancel_check())
+                except Exception:
+                    # Don't let a flaky cancel_check kill the run.
+                    cancelled = False
+                if cancelled:
+                    proc.kill()
+                    try: proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired: pass
+                    # Best-effort cleanup of the partial WAV we asked for.
+                    try:
+                        if os.path.exists(dst):
+                            os.remove(dst)
+                    except OSError:
+                        pass
+                    raise RuntimeError("cancelled")
+            if time.monotonic() - started > eff_timeout:
+                proc.kill()
+                try: proc.wait(timeout=2)
+                except subprocess.TimeoutExpired: pass
+                raise RuntimeError(f"ffmpeg timed out after {eff_timeout}s")
+    finally:
+        if register_proc is not None:
+            try:
+                register_proc(None)
+            except Exception:
+                pass
+        if stderr_fd >= 0:
+            try: os.close(stderr_fd)
+            except OSError: pass
+        # Read + delete the stderr capture (only used on failure path below;
+        # success path doesn't need it). Read AFTER ffmpeg exits so we get
+        # the full content.
+        stderr_text = ""
+        try:
+            with open(stderr_path, "r", errors="replace") as f:
+                stderr_text = f.read()
+        except OSError:
+            pass
+        try:
+            os.unlink(stderr_path)
+        except OSError:
+            pass
+
+    if rc != 0:
+        raise RuntimeError(f"ffmpeg failed (rc={rc}): {stderr_text.strip()[-300:]}")
 
 
 import json as _json
@@ -82,6 +203,25 @@ def run_transcribe(*, audio_path: str, model_path: str,
     if progress_cb:
         progress_cb(10)
 
+    # Per-segment callback: poll cancel + nudge progress. Raising from
+    # the callback propagates back through the pywhispercpp Cython
+    # binding once the whisper.cpp loop checks for Python errors, so
+    # this gives us best-effort mid-inference cancellation. (whisper.cpp
+    # processes audio in 30-second windows; worst-case latency is one
+    # window before the abort takes effect.)
+    _seg_count = [0]
+    def _on_segment(_seg):
+        _seg_count[0] += 1
+        if cancel_check and cancel_check():
+            raise _Cancelled()
+        # Heuristic progress: ramp 10→90 as segments arrive. We can't
+        # know the true total ahead of time, so use a saturating curve.
+        if progress_cb:
+            n = _seg_count[0]
+            pct = 10 + min(80, n // 4)
+            try: progress_cb(pct)
+            except Exception: pass
+
     try:
         # token_timestamps + max_len=1 + split_on_word=True → one Segment per word
         raw_segments = model.transcribe(
@@ -89,8 +229,15 @@ def run_transcribe(*, audio_path: str, model_path: str,
             token_timestamps=True,
             max_len=1,
             split_on_word=True,
+            new_segment_callback=_on_segment,
         )
+    except _Cancelled:
+        return TranscriptResult(language="", duration=0.0, segments=[], words=[], error="cancelled")
     except Exception as e:
+        # Some Cython bindings wrap our _Cancelled in a different
+        # exception type — catch that case explicitly.
+        if cancel_check and cancel_check():
+            return TranscriptResult(language="", duration=0.0, segments=[], words=[], error="cancelled")
         return TranscriptResult(language="", duration=0.0, segments=[], words=[],
                                 error=f"transcribe_error: {e}")
 

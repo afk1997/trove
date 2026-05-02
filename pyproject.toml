@@ -1,3 +1,20 @@
+[project]
+name = "trove"
+version = "0.1.0"
+description = "A small media downloader + transcript editor."
+requires-python = ">=3.11"
+
+# Core runtime deps live in requirements.txt for the Replit/Docker
+# install path. The optional `diarization` extra below brings in the
+# heavy ML stack that powers speaker labeling — it's pulled in only
+# when the user opts in via:  pip install -e ".[diarization]"
+[project.optional-dependencies]
+diarization = [
+    "resemblyzer>=0.1.4",
+    "silero-vad>=5.1",
+    "scikit-learn>=1.3",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

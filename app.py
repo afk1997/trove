@@ -1,8 +1,6 @@
 # app.py
 from __future__ import annotations
 import os
-import re
-import unicodedata
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request, send_file, abort
 
@@ -23,6 +21,8 @@ import transcribe_jobs
 import transcriber
 import transcript_io
 import time as _time
+from util import sanitize_filename
+from routes.transcript_editor import bp as transcript_editor_bp
 
 
 DOWNLOAD_DIR = Path(__file__).parent / "downloads"
@@ -31,19 +31,6 @@ DOWNLOAD_DIR.mkdir(exist_ok=True)
 JOB_TTL = int(os.environ.get("TROVE_JOB_TTL_SECONDS", "3600"))
 MAX_WORKERS = int(os.environ.get("TROVE_MAX_WORKERS", "4"))
 RATE_LIMIT_PER_MIN = int(os.environ.get("TROVE_RATE_LIMIT", "30"))
-
-
-def sanitize_filename(title: str, ext: str) -> str:
-    """Produce a safe download_name. Falls back to a placeholder when empty."""
-    if not title:
-        return f"trove-download{ext}"
-    # NFC normalize, drop control chars and bad filename chars, trim length.
-    s = unicodedata.normalize("NFC", title)
-    s = "".join(ch for ch in s if ch.isprintable())
-    s = re.sub(r'[\\/:*?"<>|]+', "", s)
-    s = s.strip().strip(".")
-    s = s[:150].strip()
-    return f"{s}{ext}" if s else f"trove-download{ext}"
 
 
 def create_app() -> Flask:
@@ -60,7 +47,6 @@ def create_app() -> Flask:
         ttl_seconds=JOB_TTL,
         store_path=DOWNLOAD_DIR / "jobs.json",
     )
-    job_manager.start_sweeper(interval_seconds=300)
     app.extensions["trove.jobs"] = job_manager
     app.extensions["trove.rate_limiter"] = rate_limiter
 
@@ -69,6 +55,45 @@ def create_app() -> Flask:
         store_path=DOWNLOAD_DIR / "transcribe_jobs.json",
     )
     app.extensions["trove.transcribe"] = transcribe_manager
+
+    # Per-app transcript-edit lock state (keyed by transcript base path).
+    # Lives on app.extensions so the transcript-editor blueprint can
+    # access it via current_app and so multiple test apps in the same
+    # process don't share locks.
+    app.extensions["trove.txn_locks"] = {}
+    app.extensions["trove.txn_locks_guard"] = Lock()
+
+    # Register split-out blueprints. See routes/__init__.py for why.
+    app.register_blueprint(transcript_editor_bp)
+
+    # Sweeper has to start AFTER both managers exist because the
+    # keep_predicate references transcribe_manager — without it the
+    # TTL sweep would unlink the source media for every completed
+    # transcript after one idle hour, silently 404-ing the transcript
+    # page and dropping the download.
+    #
+    # Important: walk ALL children, not just the most recent one. A
+    # parent may have an older DONE transcribe AND a newer ERROR
+    # transcribe (e.g. user re-ran the transcribe with a bigger model
+    # and it failed). The older DONE result is still valid and must
+    # keep the parent alive. Using ``get_by_parent`` (which returns
+    # only the latest) would silently drop those.
+    _KEEP_STATUSES = {
+        transcribe_jobs.TranscribeStatus.QUEUED,
+        transcribe_jobs.TranscribeStatus.RUNNING,
+        transcribe_jobs.TranscribeStatus.DONE,
+    }
+
+    def _has_active_or_done_transcribe(parent_job) -> bool:
+        for tj in transcribe_manager.snapshot_jobs():
+            if tj.parent_job_id == parent_job.id and tj.status in _KEEP_STATUSES:
+                return True
+        return False
+
+    job_manager.start_sweeper(
+        interval_seconds=300,
+        keep_predicate=_has_active_or_done_transcribe,
+    )
 
     @app.before_request
     def _rate_limit():
@@ -425,9 +450,27 @@ def create_app() -> Flask:
         wav_path = base_no_ext + ".wav"
 
         def _work(tj, *, model_path):
+            def _register_ffmpeg(proc):
+                # Stash the live ffmpeg Popen on the TranscribeJob so the
+                # /cancel endpoint (which calls TranscribeJobManager.cancel)
+                # can kill it mid-extract instead of waiting for it to
+                # complete. Cleared (set to None) when extract returns.
+                tj.process_handle = proc
+
             try:
                 # 1. Extract audio
-                transcriber.extract_audio(media_path, wav_path)
+                try:
+                    transcriber.extract_audio(
+                        media_path, wav_path,
+                        cancel_check=lambda: tj._cancel_flag,
+                        register_proc=_register_ffmpeg,
+                    )
+                except RuntimeError as e:
+                    # extract_audio raises RuntimeError("cancelled") when the
+                    # user hit cancel during ffmpeg — treat as a clean abort.
+                    if str(e) == "cancelled" or tj._cancel_flag:
+                        return
+                    raise
                 if tj._cancel_flag: return
                 transcribe_manager.update_progress(tj.id, 5)
 
@@ -560,26 +603,6 @@ def create_app() -> Flask:
             return None, None, None
         return tj, parent, base
 
-    def _save_after_edit(data, base):
-        """Persist + regenerate exports after any transcript mutation."""
-        data["edited_at"] = _time.time()
-        transcript_io.save(base + ".words.json", data)
-        transcript_io.regenerate_artifacts(data, base)
-
-    # Per-transcript lock: serialize concurrent mutations so the
-    # read-modify-write sequence (load → apply → save) cannot interleave
-    # and lose updates between rapid edits from the same browser.
-    _txn_locks_guard = Lock()
-    _txn_locks: dict[str, Lock] = {}
-
-    def _txn_lock(base: str) -> Lock:
-        with _txn_locks_guard:
-            lock = _txn_locks.get(base)
-            if lock is None:
-                lock = Lock()
-                _txn_locks[base] = lock
-            return lock
-
     @app.get("/transcript/<transcribe_id>")
     @token_or_sig_required
     def transcript_view(transcribe_id):
@@ -610,421 +633,9 @@ def create_app() -> Flask:
             was_edited=bool(data.get("edited_at")),
         )
 
-    # ----- transcript word edit endpoints (TR-E4) -------------------------
-
-    @app.patch("/api/transcribe/<transcribe_id>/word/<int:idx>")
-    @token_required
-    def api_word_set_text(transcribe_id, idx):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        text = request.form.get("w")
-        if text is None:
-            return jsonify({"error": "missing w"}), 400
-        with _txn_lock(base):
-            try:
-                data = transcript_io.load(base + ".words.json")
-                word = transcript_io.apply_word_op(data, idx, "set_text", w=text)
-            except transcript_io.WordOpError as e:
-                return jsonify({"error": str(e)}), 400
-            _save_after_edit(data, base)
-        return render_template("partials/transcript_word.html", w=word)
-
-    @app.delete("/api/transcribe/<transcribe_id>/word/<int:idx>")
-    @token_required
-    def api_word_delete(transcribe_id, idx):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        with _txn_lock(base):
-            try:
-                data = transcript_io.load(base + ".words.json")
-                word = transcript_io.apply_word_op(data, idx, "delete")
-            except transcript_io.WordOpError as e:
-                return jsonify({"error": str(e)}), 400
-            _save_after_edit(data, base)
-        return render_template("partials/transcript_word.html", w=word)
-
-    @app.post("/api/transcribe/<transcribe_id>/word/<int:idx>/insert-after")
-    @token_required
-    def api_word_insert_after(transcribe_id, idx):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        text = request.form.get("w", "")
-        with _txn_lock(base):
-            try:
-                data = transcript_io.load(base + ".words.json")
-                new_word = transcript_io.apply_word_op(data, idx, "insert_after", w=text)
-            except transcript_io.WordOpError as e:
-                return jsonify({"error": str(e)}), 400
-            _save_after_edit(data, base)
-        return render_template("partials/transcript_word.html", w=new_word)
-
-    @app.post("/api/transcribe/<transcribe_id>/word/<int:idx>/merge-next")
-    @token_required
-    def api_word_merge_next(transcribe_id, idx):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        with _txn_lock(base):
-            try:
-                data = transcript_io.load(base + ".words.json")
-                # Capture the peer idx BEFORE the op marks it deleted, so we
-                # know which span to swap out-of-band.
-                peer_idx = transcript_io.next_visible_word_idx(data, idx)
-                anchor = transcript_io.apply_word_op(data, idx, "merge_next")
-            except transcript_io.WordOpError as e:
-                return jsonify({"error": str(e)}), 400
-            _save_after_edit(data, base)
-            peer = data["words"][peer_idx] if peer_idx is not None else None
-        primary = render_template("partials/transcript_word.html", w=anchor)
-        if peer is None:
-            return primary
-        oob = render_template("partials/transcript_word.html", w=peer, oob=True)
-        return primary + oob
-
-    # ----- find / replace (TR-E7) -----------------------------------------
-
-    @app.post("/api/transcribe/<transcribe_id>/find-replace")
-    @token_required
-    def api_find_replace(transcribe_id):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        find = request.form.get("find", "")
-        replace = request.form.get("replace", "")
-        case_sensitive = request.form.get("case_sensitive") in ("1", "on", "true")
-        if not find:
-            return jsonify({"error": "missing find"}), 400
-        with _txn_lock(base):
-            data = transcript_io.load(base + ".words.json")
-            result = transcript_io.find_replace(
-                data, find, replace, case_sensitive=case_sensitive,
-            )
-            if result["count"]:
-                _save_after_edit(data, base)
-            fragments = {
-                str(idx): render_template(
-                    "partials/transcript_word.html", w=data["words"][idx],
-                )
-                for idx in result["indices"]
-            }
-        return jsonify({"count": result["count"], "fragments": fragments})
-
-    # ----- speaker labels (TR-E10) ----------------------------------------
-
-    @app.patch("/api/transcribe/<transcribe_id>/segment/<int:seg_idx>/speaker")
-    @token_required
-    def api_segment_speaker(transcribe_id, seg_idx):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        speaker = (request.form.get("speaker") or "").strip() or None
-        propagate = request.form.get("propagate", "1") in ("1", "on", "true")
-        with _txn_lock(base):
-            data = transcript_io.load(base + ".words.json")
-            try:
-                changed = transcript_io.apply_speaker(
-                    data, seg_idx, speaker, propagate=propagate,
-                )
-            except ValueError as e:
-                return jsonify({"error": str(e)}), 400
-            if changed:
-                _save_after_edit(data, base)
-            # Return one segment fragment per changed seg, concatenated.
-            # The JS layer swaps each in by data-seg-idx selector.
-            out_parts = []
-            for idx in changed:
-                out_parts.append(render_template(
-                    "partials/transcript_segment.html",
-                    seg=data["segments"][idx],
-                    seg_idx=idx,
-                    data=data,
-                ))
-        return "".join(out_parts) or ("", 200)
-
-    # ----- bookmarks (TR-E11) ---------------------------------------------
-
-    @app.post("/api/transcribe/<transcribe_id>/bookmark")
-    @token_required
-    def api_bookmark_create(transcribe_id):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        time_str = request.form.get("time")
-        if time_str is None:
-            return jsonify({"error": "missing time"}), 400
-        try:
-            time_f = float(time_str)
-        except (TypeError, ValueError):
-            return jsonify({"error": "invalid time"}), 400
-        note = request.form.get("note", "")
-        with _txn_lock(base):
-            data = transcript_io.load(base + ".words.json")
-            bm = transcript_io.add_bookmark(data, time_f, note)
-            _save_after_edit(data, base)
-        return render_template("partials/transcript_bookmark.html", bm=bm)
-
-    @app.patch("/api/transcribe/<transcribe_id>/bookmark/<bm_id>")
-    @token_required
-    def api_bookmark_update(transcribe_id, bm_id):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        kwargs = {}
-        if "time" in request.form:
-            try:
-                kwargs["time"] = float(request.form["time"])
-            except (TypeError, ValueError):
-                return jsonify({"error": "invalid time"}), 400
-        if "note" in request.form:
-            kwargs["note"] = request.form["note"]
-        with _txn_lock(base):
-            data = transcript_io.load(base + ".words.json")
-            bm = transcript_io.update_bookmark(data, bm_id, **kwargs)
-            if bm is None:
-                return "", 404
-            _save_after_edit(data, base)
-        return render_template("partials/transcript_bookmark.html", bm=bm)
-
-    @app.delete("/api/transcribe/<transcribe_id>/bookmark/<bm_id>")
-    @token_required
-    def api_bookmark_delete(transcribe_id, bm_id):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        with _txn_lock(base):
-            data = transcript_io.load(base + ".words.json")
-            if not transcript_io.delete_bookmark(data, bm_id):
-                return "", 404
-            _save_after_edit(data, base)
-        return "", 200
-
-    # ----- transcript document endpoints (TR-D) ---------------------------
-
-    def _render_segments(data, indices):
-        """Render concatenated segment partials for the given segment indices."""
-        parts = []
-        for idx in indices:
-            if 0 <= idx < len(data.get("segments") or []):
-                parts.append(render_template(
-                    "partials/transcript_segment.html",
-                    seg=data["segments"][idx],
-                    seg_idx=idx,
-                    data=data,
-                ))
-        return "".join(parts)
-
-    @app.patch("/api/transcribe/<transcribe_id>/title")
-    @token_required
-    def api_transcript_title(transcribe_id):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        title = request.form.get("title")
-        if title is None:
-            return jsonify({"error": "missing title"}), 400
-        with _txn_lock(base):
-            data = transcript_io.load(base + ".words.json")
-            stored = transcript_io.set_title(data, title)
-            _save_after_edit(data, base)
-        # Echo back the resolved title (parent.title fallback when blank).
-        effective = stored or (parent.title or "untitled")
-        return jsonify({"title": stored, "effective": effective})
-
-    @app.post("/api/transcribe/<transcribe_id>/segment/<int:seg_idx>/split")
-    @token_required
-    def api_segment_split(transcribe_id, seg_idx):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        try:
-            after = int(request.form.get("after_word_idx", ""))
-        except (TypeError, ValueError):
-            return jsonify({"error": "missing or invalid after_word_idx"}), 400
-        with _txn_lock(base):
-            data = transcript_io.load(base + ".words.json")
-            try:
-                left, right = transcript_io.split_segment_at_word(data, seg_idx, after)
-            except ValueError as e:
-                return jsonify({"error": str(e)}), 400
-            _save_after_edit(data, base)
-            html = _render_segments(data, [left, right])
-        return html
-
-    @app.post("/api/transcribe/<transcribe_id>/segment/<int:seg_idx>/merge-prev")
-    @token_required
-    def api_segment_merge_prev(transcribe_id, seg_idx):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        with _txn_lock(base):
-            data = transcript_io.load(base + ".words.json")
-            try:
-                merged = transcript_io.merge_segment_with_prev(data, seg_idx)
-            except ValueError as e:
-                return jsonify({"error": str(e)}), 400
-            _save_after_edit(data, base)
-            html = _render_segments(data, [merged])
-        return html
-
-    @app.patch("/api/transcribe/<transcribe_id>/speaker-rename")
-    @token_required
-    def api_speaker_rename(transcribe_id):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        if "old" not in request.form or "new" not in request.form:
-            return jsonify({"error": "missing old or new"}), 400
-        old_raw = request.form.get("old", "")
-        old = old_raw.strip() or None
-        new = request.form.get("new", "")
-        with _txn_lock(base):
-            data = transcript_io.load(base + ".words.json")
-            changed = transcript_io.rename_speaker(data, old, new)
-            if changed:
-                _save_after_edit(data, base)
-            html = _render_segments(data, changed)
-        return jsonify({"updated": changed, "html": html})
-
-    @app.post("/api/transcribe/<transcribe_id>/highlight")
-    @token_required
-    def api_highlight_create(transcribe_id):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        try:
-            start = int(request.form.get("word_idx_start", ""))
-            end = int(request.form.get("word_idx_end", ""))
-        except (TypeError, ValueError):
-            return jsonify({"error": "missing word_idx_start / word_idx_end"}), 400
-        with _txn_lock(base):
-            data = transcript_io.load(base + ".words.json")
-            try:
-                h = transcript_io.add_highlight(data, start, end)
-            except ValueError as e:
-                return jsonify({"error": str(e)}), 400
-            _save_after_edit(data, base)
-        return jsonify(h)
-
-    @app.delete("/api/transcribe/<transcribe_id>/highlight/<h_id>")
-    @token_required
-    def api_highlight_delete(transcribe_id, h_id):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        with _txn_lock(base):
-            data = transcript_io.load(base + ".words.json")
-            if not transcript_io.delete_highlight(data, h_id):
-                return "", 404
-            _save_after_edit(data, base)
-        return "", 200
-
-    @app.post("/api/transcribe/<transcribe_id>/note")
-    @token_required
-    def api_note_create(transcribe_id):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        try:
-            word_idx = int(request.form.get("word_idx", ""))
-        except (TypeError, ValueError):
-            return jsonify({"error": "missing word_idx"}), 400
-        text = request.form.get("text", "")
-        with _txn_lock(base):
-            data = transcript_io.load(base + ".words.json")
-            try:
-                note = transcript_io.add_note(data, word_idx, text)
-            except ValueError as e:
-                return jsonify({"error": str(e)}), 400
-            _save_after_edit(data, base)
-        return jsonify(note)
-
-    @app.patch("/api/transcribe/<transcribe_id>/note/<n_id>")
-    @token_required
-    def api_note_update(transcribe_id, n_id):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        if "text" not in request.form:
-            return jsonify({"error": "missing text"}), 400
-        with _txn_lock(base):
-            data = transcript_io.load(base + ".words.json")
-            note = transcript_io.update_note(data, n_id, request.form["text"])
-            if note is None:
-                return "", 404
-            _save_after_edit(data, base)
-        return jsonify(note)
-
-    @app.delete("/api/transcribe/<transcribe_id>/note/<n_id>")
-    @token_required
-    def api_note_delete(transcribe_id, n_id):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        with _txn_lock(base):
-            data = transcript_io.load(base + ".words.json")
-            if not transcript_io.delete_note(data, n_id):
-                return "", 404
-            _save_after_edit(data, base)
-        return "", 200
-
-    @app.patch("/api/transcribe/<transcribe_id>/segment/<int:seg_idx>/reviewed")
-    @token_required
-    def api_segment_reviewed(transcribe_id, seg_idx):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        raw = request.form.get("reviewed", "")
-        reviewed = raw in ("1", "on", "true", "yes")
-        with _txn_lock(base):
-            data = transcript_io.load(base + ".words.json")
-            try:
-                changed = transcript_io.set_segment_reviewed(data, seg_idx, reviewed)
-            except ValueError as e:
-                return jsonify({"error": str(e)}), 400
-            if changed:
-                _save_after_edit(data, base)
-        return jsonify({"seg_idx": seg_idx, "reviewed": reviewed})
-
-    @app.post("/api/transcribe/<transcribe_id>/export-selection")
-    @token_required
-    def api_export_selection(transcribe_id):
-        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
-        if tj is None:
-            return "", 404
-        try:
-            start = int(request.form.get("word_idx_start", ""))
-            end = int(request.form.get("word_idx_end", ""))
-        except (TypeError, ValueError):
-            return jsonify({"error": "missing word_idx_start / word_idx_end"}), 400
-        with _txn_lock(base):
-            data = transcript_io.load(base + ".words.json")
-            words = data.get("words") or []
-            if start < 0 or end >= len(words) or start > end:
-                return jsonify({"error": "invalid range"}), 400
-            # Walk segments; emit any segment that overlaps [start..end] as
-            # "[hh:mm:ss] <words>". Words outside the range are skipped.
-            chunks = []
-            for seg in data.get("segments") or []:
-                ids = [j for j in seg.get("word_idxs", [])
-                       if start <= j <= end and not words[j].get("deleted")]
-                if not ids:
-                    continue
-                ts = transcript_io._format_timestamp(float(seg.get("start", 0.0)), srt=False)
-                text = " ".join(words[j].get("w", "") for j in ids).strip()
-                if text:
-                    chunks.append(f"[{ts}] {text}")
-            body = "\n\n".join(chunks) + ("\n" if chunks else "")
-        download_name = sanitize_filename((parent.title or "selection") + " (selection)", ".txt")
-        from flask import Response
-        return Response(
-            body,
-            mimetype="text/plain; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
-        )
-
+    # Transcript editor mutation endpoints (word/segment/speaker/bookmark/
+    # highlight/note/title/find-replace/reviewed/export-selection) live in
+    # routes/transcript_editor.py and were registered above as a Blueprint.
     # --- helpers -----------------------------------------------------------
 
     def _enqueue_download(url: str, format_choice: str, format_id, title: str, thumbnail: str = "") -> str:

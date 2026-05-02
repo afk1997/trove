@@ -375,7 +375,7 @@ def test_transcribe_start_idempotent_for_running_parent(client, tmp_path, monkey
     # transcribe stays RUNNING when the second POST arrives.
     import transcriber
     import time as _t
-    def _slow_extract(src, dst):
+    def _slow_extract(src, dst, **kw):
         _t.sleep(0.4)
         Path(dst).write_bytes(b"WAV-FAKE")
     monkeypatch.setattr(transcriber, "extract_audio", _slow_extract)

@@ -279,15 +279,40 @@ class JobManager:
         self._executor.submit(_run)
         return True
 
-    def sweep(self) -> int:
+    def sweep(self, *, keep_predicate: Callable[[Job], bool] | None = None) -> int:
+        """Drop terminal jobs whose last_accessed is older than ttl_seconds.
+
+        ``keep_predicate(job) -> bool`` (optional): when supplied and it
+        returns True for a job that would otherwise be swept, the job is
+        retained AND its ``last_accessed`` is refreshed so it doesn't
+        immediately re-qualify for sweep on the next pass.
+
+        This hook exists so the app can preserve parent media jobs that
+        still have a completed transcribe child — without it, the TTL
+        sweep would silently 404 every transcript page after one idle
+        hour and unlink the source media that the transcript's <video>
+        element points at.
+        """
         cutoff = time.monotonic() - self.ttl_seconds
         removed = 0
         with self._lock:
-            to_remove = [
-                jid for jid, j in self._jobs.items()
-                if j.status in {JobStatus.DONE, JobStatus.ERROR, JobStatus.CANCELLED}
-                and j.last_accessed <= cutoff
-            ]
+            kept_ids: list[str] = []
+            to_remove: list[str] = []
+            for jid, j in self._jobs.items():
+                if j.status not in {JobStatus.DONE, JobStatus.ERROR, JobStatus.CANCELLED}:
+                    continue
+                if j.last_accessed > cutoff:
+                    continue
+                if keep_predicate is not None:
+                    try:
+                        if keep_predicate(j):
+                            kept_ids.append(jid)
+                            continue
+                    except Exception:
+                        # A buggy predicate must not destroy a real job.
+                        kept_ids.append(jid)
+                        continue
+                to_remove.append(jid)
             for jid in to_remove:
                 job = self._jobs.pop(jid)
                 if job.file_path and os.path.exists(job.file_path):
@@ -296,16 +321,25 @@ class JobManager:
                     except OSError:
                         pass
                 removed += 1
+            now = time.monotonic()
+            for jid in kept_ids:
+                # Bump last_accessed so we don't re-evaluate on every sweep.
+                self._jobs[jid].last_accessed = now
         if removed:
             self._persist()
         return removed
 
-    def start_sweeper(self, interval_seconds: int = 300) -> None:
+    def start_sweeper(
+        self,
+        interval_seconds: int = 300,
+        *,
+        keep_predicate: Callable[[Job], bool] | None = None,
+    ) -> None:
         def loop():
             while True:
                 time.sleep(interval_seconds)
                 try:
-                    self.sweep()
+                    self.sweep(keep_predicate=keep_predicate)
                 except Exception:
                     pass
         t = threading.Thread(target=loop, daemon=True, name="trove-sweeper")
