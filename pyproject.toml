@@ -4,16 +4,23 @@ version = "0.1.0"
 description = "A small media downloader + transcript editor."
 requires-python = ">=3.11"
 
-# Core runtime deps live in requirements.txt for the Replit/Docker
-# install path. The optional `diarization` extra below brings in the
-# heavy ML stack that powers speaker labeling — it's pulled in only
-# when the user opts in via:  pip install -e ".[diarization]"
-[project.optional-dependencies]
-diarization = [
+# Runtime deps. Diarization (resemblyzer / silero-vad / scikit-learn)
+# is now a core dep — speaker labelling is on by default and we don't
+# want users to have to remember a separate install step. The CUDA
+# wheels torch pulls in transitively are heavy (~1.3GB) but the install
+# is one-shot per environment.
+dependencies = [
+    "flask>=3.0",
+    "yt-dlp",
+    "pywhispercpp>=1.2.0",
+    "psutil>=5.9",
     "resemblyzer>=0.1.4",
     "silero-vad>=5.1",
     "scikit-learn>=1.3",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

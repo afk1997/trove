@@ -223,12 +223,14 @@ def test_diarize_passes_through_explicit_speaker_count(monkeypatch):
     def fake_vad(_path):
         return [{"start": float(i), "end": float(i) + 0.6} for i in range(6)]
 
-    def fake_embed(_path, _chunks):
-        # Six embeddings, two natural clusters
-        return np.vstack([
+    def fake_embed(_path, chunks):
+        # Real _embed_chunks returns (kept_chunks, embeddings).
+        # Six embeddings, two natural clusters; no chunks dropped.
+        embs = np.vstack([
             np.array([[1.0, 0.0]] * 3) + 0.01,
             np.array([[0.0, 1.0]] * 3) + 0.01,
         ])
+        return list(chunks), embs
 
     monkeypatch.setattr(d, "_vad_speech_chunks", fake_vad)
     monkeypatch.setattr(d, "_embed_chunks", fake_embed)

@@ -196,19 +196,26 @@ def _auto_k(embeddings, max_k: int = 6) -> int:
     best_k = 1
     best_score = float("inf")
     prev_score = None
+    # Absolute floor: once clusters are this tight, splitting further is
+    # numerical noise. Without this floor, perfectly-separated test data
+    # would walk all the way to max_k because the relative 5%-shrink
+    # check below collapses to "0 > 0" → False.
+    TIGHT_ENOUGH = 1e-3
     for k in range(2, upper + 1):
         clf = AgglomerativeClustering(
             n_clusters=k, metric="cosine", linkage="average",
         )
         labels = clf.fit_predict(embeddings)
         score = _within_cluster_dist(embeddings, labels)
-        # Stop if adding another cluster doesn't shrink within-cluster dist
-        # by at least 5%.
-        if prev_score is not None and score > prev_score * 0.95:
-            break
         if score < best_score:
             best_score = score
             best_k = k
+        # Stop if clusters are already essentially perfect, OR if adding
+        # another cluster doesn't shrink within-cluster dist by at least 5%.
+        if score <= TIGHT_ENOUGH:
+            break
+        if prev_score is not None and score > prev_score * 0.95:
+            break
         prev_score = score
     return best_k
 

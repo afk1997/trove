@@ -8,10 +8,13 @@ local whisper.cpp-based transcript editor.
 - `app.py` — Flask app + worker threads (download jobs, transcribe jobs).
 - `transcriber.py` — whisper.cpp wrapper (`run_transcribe`, `write_artifacts`,
   `apply_speakers` for diarization-aware regrouping).
-- `diarizer.py` — optional local diarization (silero-vad → resemblyzer
-  embeddings → sklearn agglomerative clustering). Lazy-imports its heavy
-  deps; gated behind `TROVE_DIARIZATION` env var (default off). Heavy
-  deps (~800MB incl. PyTorch) are NOT installed by default.
+- `diarizer.py` — local diarization (silero-vad → resemblyzer
+  embeddings → sklearn agglomerative clustering). The deps
+  (resemblyzer + silero-vad + scikit-learn, ~1.3GB on Linux incl.
+  PyTorch+CUDA wheels) ship by default in `requirements.txt` /
+  `pyproject.toml [project] dependencies`. The *feature* is still
+  gated at runtime behind `TROVE_DIARIZATION` env var (default off)
+  so plain transcribe runs don't pay the model-load cost.
 - `transcript_io.py` — atomic JSON sidecar I/O for the transcript editor.
 - `templates/transcript.html` — single-file transcript editor (CSP-nonced
   inline JS, no second `<script>` tag allowed).
@@ -29,7 +32,10 @@ local whisper.cpp-based transcript editor.
 - No HuggingFace logins, no auth tokens, no cloud APIs for transcription
   or diarization. Everything must run locally.
 - Visible bugs (CSS bleed-throughs, focus rings) are high priority.
-- Heavy ML deps (PyTorch, etc.) are opt-in only — must be feature-flagged.
+- Heavy ML deps (PyTorch via resemblyzer, etc.) ship by default but
+  the *features* that use them must stay runtime-feature-flagged
+  (e.g. `TROVE_DIARIZATION=on`) so the user opts into the cost, not
+  the install.
 
 ## Recent changes
 
