@@ -1,4 +1,6 @@
 from __future__ import annotations
+import hmac
+import hashlib
 import ipaddress
 import socket
 from urllib.parse import urlparse
@@ -90,6 +92,54 @@ def token_required(view):
         header = request.headers.get("Authorization", "")
         if header == f"Bearer {token}":
             return view(*args, **kwargs)
+        return jsonify({"error": "unauthorized"}), 401
+    return wrapper
+
+
+def sign_resource(resource_id: str) -> str:
+    """Return an HMAC-SHA256 sig for `resource_id` keyed by TROVE_TOKEN.
+
+    Used to authenticate media URLs embedded in pages where the browser
+    can't attach an Authorization header (e.g. <video src>). Returns an
+    empty string when TROVE_TOKEN is unset (no signature needed).
+    """
+    token = os.environ.get("TROVE_TOKEN", "").strip()
+    if not token:
+        return ""
+    return hmac.new(token.encode(), resource_id.encode(), hashlib.sha256).hexdigest()
+
+
+def verify_resource_sig(resource_id: str, sig: str) -> bool:
+    """Constant-time check against the expected signature for resource_id."""
+    expected = sign_resource(resource_id)
+    if not expected:
+        return False
+    return hmac.compare_digest(expected, sig or "")
+
+
+def token_or_sig_required(view):
+    """Like token_required, but ALSO accepts a `?sig=…` query param signed by sign_resource.
+
+    Use on routes whose URL gets embedded in publicly-rendered HTML
+    (e.g. /api/file/<id> as a <video src>). The view handler must accept
+    the resource id as the FIRST positional argument so we can verify
+    the signature against it.
+    """
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        token = os.environ.get("TROVE_TOKEN", "").strip()
+        if not token:
+            return view(*args, **kwargs)
+        header = request.headers.get("Authorization", "")
+        if header == f"Bearer {token}":
+            return view(*args, **kwargs)
+        # Accept signed URL: extract the resource id from the route kwargs
+        sig = request.args.get("sig", "")
+        # Find the first kwarg that's the resource id (Flask passes route
+        # vars as kwargs). We accept any string-typed kwarg.
+        for v in kwargs.values():
+            if isinstance(v, str) and verify_resource_sig(v, sig):
+                return view(*args, **kwargs)
         return jsonify({"error": "unauthorized"}), 401
     return wrapper
 

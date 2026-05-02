@@ -9,6 +9,8 @@ from flask import Flask, jsonify, render_template, request, send_file, abort
 from safety import (
     is_safe_url,
     token_required,
+    token_or_sig_required,
+    sign_resource,
     RateLimiter,
     attach_security_headers,
 )
@@ -132,7 +134,7 @@ def create_app() -> Flask:
         })
 
     @app.get("/api/file/<job_id>")
-    @token_required
+    @token_or_sig_required
     def api_file(job_id):
         job = job_manager.get(job_id)
         if job is None or job.status != JobStatus.DONE or not job.file_path:
@@ -399,6 +401,19 @@ def create_app() -> Flask:
         if parent is None or parent.status != JobStatus.DONE or not parent.file_path:
             return jsonify({"error": "parent_not_done"}), 404
 
+        # Idempotent: if a transcribe is already running or queued for this
+        # parent, return its current action partial instead of submitting
+        # another. Prevents the double-click race where two threads write
+        # the same .wav and clobber each other's outputs.
+        existing = transcribe_manager.get_by_parent(parent_job_id)
+        if existing and existing.status in (
+            transcribe_jobs.TranscribeStatus.QUEUED,
+            transcribe_jobs.TranscribeStatus.RUNNING,
+        ):
+            return render_template(
+                "partials/transcribe_action.html", tj=existing, parent=parent,
+            )
+
         media_path = parent.file_path
         base_no_ext = os.path.splitext(media_path)[0]  # downloads/<id>
         wav_path = base_no_ext + ".wav"
@@ -443,14 +458,27 @@ def create_app() -> Flask:
         tj = transcribe_manager.get(tjid)
         return render_template("partials/transcribe_action.html", tj=tj, parent=parent)
 
+    def _cleanup_orphan_transcribe(transcribe_id):
+        """Cancel + dismiss an orphan transcribe job whose parent is gone.
+
+        Cancel flips non-terminal status to CANCELLED; dismiss then accepts
+        CANCELLED and pops it. Two-step because dismiss refuses non-terminal.
+        """
+        transcribe_manager.cancel(transcribe_id)
+        transcribe_manager.dismiss(transcribe_id)
+
     @app.get("/api/transcribe/<transcribe_id>/status")
     @token_required
     def api_transcribe_status(transcribe_id):
         tj = transcribe_manager.get(transcribe_id)
         if tj is None:
             return "", 404
-        # Need parent for context (id, etc.)
+        # If the parent media job has been TTL-swept, the transcribe job
+        # is orphaned — clean it up and 404 the polling client.
         parent = job_manager.get(tj.parent_job_id)
+        if parent is None:
+            _cleanup_orphan_transcribe(transcribe_id)
+            return "", 404
         return render_template("partials/transcribe_action.html", tj=tj, parent=parent)
 
     @app.post("/api/transcribe/<transcribe_id>/cancel")
@@ -461,6 +489,9 @@ def create_app() -> Flask:
             return "", 404
         transcribe_manager.cancel(transcribe_id)
         parent = job_manager.get(tj.parent_job_id)
+        if parent is None:
+            _cleanup_orphan_transcribe(transcribe_id)
+            return "", 404
         return render_template("partials/transcribe_action.html", tj=tj, parent=parent)
 
     @app.post("/api/transcribe/<transcribe_id>/dismiss")
@@ -514,13 +545,20 @@ def create_app() -> Flask:
         ext = os.path.splitext(parent.file_path)[1].lower()
         is_audio = ext in {".mp3", ".m4a", ".ogg", ".wav", ".flac"}
 
+        # Sign the media URL so the <video src> works even when TROVE_TOKEN
+        # is set (browsers can't attach Authorization headers to media src).
+        sig = sign_resource(parent.id)
+        media_url = f"/api/file/{parent.id}"
+        if sig:
+            media_url = f"{media_url}?sig={sig}"
+
         return render_template(
             "transcript.html",
             tj=tj,
             parent=parent,
             data=data,
             is_audio=is_audio,
-            media_url=f"/api/file/{parent.id}",
+            media_url=media_url,
         )
 
     # --- helpers -----------------------------------------------------------

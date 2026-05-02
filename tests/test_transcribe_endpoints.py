@@ -9,7 +9,12 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("TROVE_RATE_LIMIT", "0")
     monkeypatch.setenv("TROVE_JOB_TTL_SECONDS", "60")
     monkeypatch.delenv("TROVE_TOKEN", raising=False)
+    import app as _app
     import models_store
+    # Repoint both data dirs at the per-test temp dir so jobs.json /
+    # transcribe_jobs.json don't pollute across test runs.
+    (tmp_path / "downloads").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(_app, "DOWNLOAD_DIR", tmp_path / "downloads")
     monkeypatch.setattr(models_store, "MODELS_DIR", tmp_path / "models")
     app = create_app()
     return app.test_client()
@@ -300,3 +305,100 @@ def test_export_unknown_format_404(client, tmp_path):
 def test_export_unknown_id_404(client):
     res = client.get("/api/transcribe/zzz/export.txt")
     assert res.status_code == 404
+
+
+def test_signed_file_url_works_under_token(tmp_path, monkeypatch):
+    """When TROVE_TOKEN is set, /api/file/<id>?sig=<hmac> serves without bearer.
+
+    This is the path the transcript page's <video src> uses, since browsers
+    can't attach Authorization headers to media src.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TROVE_RATE_LIMIT", "0")
+    monkeypatch.setenv("TROVE_TOKEN", "secret")
+    import models_store
+    monkeypatch.setattr(models_store, "MODELS_DIR", tmp_path / "models")
+    app = create_app()
+    c = app.test_client()
+
+    from jobs import Job, JobStatus
+    media = tmp_path / "abc1.mp4"
+    media.write_bytes(b"M4A-FAKE")
+    jm = app.extensions["trove.jobs"]
+    with jm._lock:
+        jm._jobs["abc1"] = Job(id="abc1", url="https://x", title="x",
+                               status=JobStatus.DONE,
+                               file_path=str(media), filename="abc1.mp4")
+
+    # Without sig and without bearer → 401
+    assert c.get("/api/file/abc1").status_code == 401
+    # With bearer → 200
+    assert c.get("/api/file/abc1",
+                 headers={"Authorization": "Bearer secret"}).status_code == 200
+    # With matching sig → 200
+    from safety import sign_resource
+    sig = sign_resource("abc1")
+    assert sig  # token is set, so sig is non-empty
+    assert c.get(f"/api/file/abc1?sig={sig}").status_code == 200
+    # With wrong sig → 401
+    assert c.get("/api/file/abc1?sig=deadbeef").status_code == 401
+
+
+def test_transcribe_start_idempotent_for_running_parent(client, tmp_path, monkeypatch):
+    """Two POSTs to /start in quick succession yield only one TranscribeJob."""
+    import models_store
+    (tmp_path / "models").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "models" / "ggml-base.bin").write_bytes(b"x")
+    models_store.set_active("ggml-base.bin")
+
+    from jobs import Job, JobStatus
+    from pathlib import Path
+    media = tmp_path / "abc2.mp4"
+    media.write_bytes(b"x")
+    jm = client.application.extensions["trove.jobs"]
+    with jm._lock:
+        jm._jobs["abc2"] = Job(id="abc2", url="https://x", title="x",
+                               status=JobStatus.DONE,
+                               file_path=str(media), filename="abc2.mp4")
+
+    # Patch extract_audio + run_transcribe to block briefly so the first
+    # transcribe stays RUNNING when the second POST arrives.
+    import transcriber
+    import time as _t
+    def _slow_extract(src, dst):
+        _t.sleep(0.4)
+        Path(dst).write_bytes(b"WAV-FAKE")
+    monkeypatch.setattr(transcriber, "extract_audio", _slow_extract)
+    monkeypatch.setattr(transcriber, "_load_pywhispercpp_model",
+                        lambda p: type("M", (), {
+                            "transcribe": lambda self, *a, **kw: [],
+                            "detected_language": lambda self: "en",
+                        })())
+
+    r1 = client.post("/api/transcribe/abc2/start")
+    assert r1.status_code == 200
+    # Give the worker a moment to set status=RUNNING
+    _t.sleep(0.1)
+    r2 = client.post("/api/transcribe/abc2/start")
+    assert r2.status_code == 200
+    # Only one TranscribeJob should exist for this parent
+    tjm = client.application.extensions["trove.transcribe"]
+    with tjm._lock:
+        jobs_for_parent = [j for j in tjm._jobs.values() if j.parent_job_id == "abc2"]
+    assert len(jobs_for_parent) == 1
+
+
+def test_transcribe_status_orphaned_returns_404(client, tmp_path):
+    """If parent job is gone, status endpoint dismisses the orphan and 404s."""
+    from transcribe_jobs import TranscribeJob, TranscribeStatus
+    tjm = client.application.extensions["trove.transcribe"]
+    with tjm._lock:
+        tjm._jobs["orphan1"] = TranscribeJob(
+            id="orphan1", parent_job_id="ghost",
+            model_used="ggml-base.bin", status=TranscribeStatus.RUNNING,
+        )
+    res = client.get("/api/transcribe/orphan1/status")
+    assert res.status_code == 404
+    # Should have been dismissed
+    with tjm._lock:
+        assert "orphan1" not in tjm._jobs

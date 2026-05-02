@@ -33,7 +33,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Users wanting explicit control can bind-mount: -v ./models:/app/models
 VOLUME /app/models
 
-COPY app.py jobs.py runner.py safety.py ./
+COPY *.py ./
 COPY templates/ ./templates/
 COPY static/ ./static/
 COPY --from=builder /build/static/app.css ./static/app.css
