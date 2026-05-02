@@ -67,6 +67,12 @@ def load(path: str) -> dict:
         data = json.load(f)
 
     if data.get("schema_version") == SCHEMA_VERSION:
+        # v2 -> v2.1 backfill: the v3 redesign added optional title /
+        # highlights / notes / reviewed fields. Old v2 files lack them;
+        # patch them in on read so callers always see the full shape.
+        # Persisted lazily on the next save().
+        if _backfill_v21_defaults(data):
+            save(path, data)
         return data
 
     # v1 file -> back up raw bytes once, then migrate + rewrite.
@@ -78,6 +84,25 @@ def load(path: str) -> dict:
     _migrate_v1_to_v2(data)
     save(path, data)
     return data
+
+
+def _backfill_v21_defaults(data: dict) -> bool:
+    """Populate v2.1 fields on an already-v2 doc; return True iff anything changed."""
+    changed = False
+    if "title" not in data:
+        data["title"] = None
+        changed = True
+    if "highlights" not in data:
+        data["highlights"] = []
+        changed = True
+    if "notes" not in data:
+        data["notes"] = []
+        changed = True
+    for seg in data.get("segments") or []:
+        if "reviewed" not in seg:
+            seg["reviewed"] = False
+            changed = True
+    return changed
 
 
 def save(path: str, data: dict) -> None:
@@ -145,6 +170,14 @@ def _migrate_v1_to_v2(data: dict) -> None:
 
     data.setdefault("bookmarks", [])
     data.setdefault("edited_at", None)
+    # v2.1 (additive, no schema bump): document title, per-segment reviewed
+    # flag, highlights and notes arrays. Defaults are picked so a freshly
+    # migrated v1 doc renders identically to before the v3 redesign.
+    data.setdefault("title", None)
+    data.setdefault("highlights", [])
+    data.setdefault("notes", [])
+    for seg in segments:
+        seg.setdefault("reviewed", False)
     data["schema_version"] = SCHEMA_VERSION
 
 
@@ -455,6 +488,222 @@ def delete_bookmark(data: dict, bm_id: str) -> bool:
             del bms[i]
             return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Document title (TR-D series)
+# ---------------------------------------------------------------------------
+
+
+def set_title(data: dict, title: str | None) -> str | None:
+    """Set ``data['title']`` (None / empty falls back to parent.title at render).
+
+    Returns the stored value (None for empty input).
+    """
+    val = (title or "").strip() or None
+    data["title"] = val
+    return val
+
+
+# ---------------------------------------------------------------------------
+# Segment split / merge (TR-D)
+# ---------------------------------------------------------------------------
+
+
+def split_segment_at_word(data: dict, seg_idx: int, after_word_idx: int) -> tuple[int, int]:
+    """Split ``segments[seg_idx]`` so that ``after_word_idx`` ends the first half.
+
+    The new (right) segment inherits the original speaker + reviewed flag and
+    its ``start`` time is derived from its first word's ``start``. The left
+    half keeps the same ``seg_idx``; the right half is inserted at
+    ``seg_idx + 1`` and shifts every following segment's index by +1.
+
+    Returns ``(left_idx, right_idx)``.
+
+    Raises ``ValueError`` if the split point is invalid (out-of-range, last
+    word in segment, or word not in this segment).
+    """
+    segments = data.get("segments") or []
+    if seg_idx < 0 or seg_idx >= len(segments):
+        raise ValueError(f"segment idx out of range: {seg_idx}")
+    seg = segments[seg_idx]
+    ids = seg.get("word_idxs", [])
+    try:
+        pos = ids.index(after_word_idx)
+    except ValueError:
+        raise ValueError(f"word {after_word_idx} not in segment {seg_idx}")
+    if pos == len(ids) - 1:
+        raise ValueError("cannot split after the last word in a segment")
+
+    left_ids = ids[: pos + 1]
+    right_ids = ids[pos + 1:]
+    words = data.get("words") or []
+
+    def _bound(ids_, key):
+        for j in ids_:
+            if 0 <= j < len(words) and not words[j].get("deleted"):
+                v = words[j].get(key)
+                if v is not None:
+                    return float(v)
+        return None
+
+    left_start = _bound(left_ids, "start")
+    if left_start is None:
+        left_start = float(seg.get("start", 0.0))
+    left_end_vals = [float(words[j].get("end", 0.0)) for j in left_ids
+                     if 0 <= j < len(words) and not words[j].get("deleted")]
+    left_end = max(left_end_vals) if left_end_vals else left_start
+
+    right_start = _bound(right_ids, "start")
+    if right_start is None:
+        right_start = left_end
+    right_end_vals = [float(words[j].get("end", 0.0)) for j in right_ids
+                      if 0 <= j < len(words) and not words[j].get("deleted")]
+    right_end = max(right_end_vals) if right_end_vals else float(seg.get("end", right_start))
+
+    seg["word_idxs"] = left_ids
+    seg["start"] = left_start
+    seg["end"] = left_end
+    seg["text"] = render_segment_text(seg, words)
+
+    new_seg = {
+        "start": right_start,
+        "end": right_end,
+        "text": "",
+        "word_idxs": right_ids,
+        "speaker": seg.get("speaker"),
+        "reviewed": False,  # split halves start unreviewed; user re-marks if desired
+    }
+    new_seg["text"] = render_segment_text(new_seg, words)
+    segments.insert(seg_idx + 1, new_seg)
+    return seg_idx, seg_idx + 1
+
+
+def merge_segment_with_prev(data: dict, seg_idx: int) -> int:
+    """Merge ``segments[seg_idx]`` into the segment before it; return the merged idx.
+
+    The merged segment keeps ``segments[seg_idx-1]``'s speaker (the earlier
+    one wins). ``reviewed`` is True only if both halves were reviewed.
+
+    Raises ``ValueError`` if ``seg_idx`` is 0 or out of range.
+    """
+    segments = data.get("segments") or []
+    if seg_idx <= 0 or seg_idx >= len(segments):
+        raise ValueError(f"cannot merge segment {seg_idx} with previous")
+    cur = segments[seg_idx]
+    prev = segments[seg_idx - 1]
+    prev["word_idxs"] = list(prev.get("word_idxs", [])) + list(cur.get("word_idxs", []))
+    prev["end"] = float(cur.get("end", prev.get("end", 0.0)))
+    prev["reviewed"] = bool(prev.get("reviewed")) and bool(cur.get("reviewed"))
+    prev["text"] = render_segment_text(prev, data.get("words") or [])
+    del segments[seg_idx]
+    return seg_idx - 1
+
+
+# ---------------------------------------------------------------------------
+# Global speaker rename (TR-D)
+# ---------------------------------------------------------------------------
+
+
+def rename_speaker(data: dict, old: str | None, new: str | None) -> list[int]:
+    """Replace every occurrence of ``old`` speaker label with ``new``.
+
+    Returns the list of segment indices whose speaker changed. ``new`` of
+    empty / None clears the speaker on matched segments.
+    """
+    segments = data.get("segments") or []
+    new_val = (new or "").strip() or None
+    changed: list[int] = []
+    for i, seg in enumerate(segments):
+        if seg.get("speaker") == old:
+            if seg.get("speaker") != new_val:
+                seg["speaker"] = new_val
+                changed.append(i)
+    return changed
+
+
+# ---------------------------------------------------------------------------
+# Highlights (TR-D)
+# ---------------------------------------------------------------------------
+
+
+def add_highlight(data: dict, word_idx_start: int, word_idx_end: int) -> dict:
+    """Append a highlight covering [start..end] inclusive; return the new dict.
+
+    Raises ``ValueError`` for an inverted or out-of-range range.
+    """
+    n = len(data.get("words") or [])
+    if word_idx_start < 0 or word_idx_end >= n or word_idx_start > word_idx_end:
+        raise ValueError(
+            f"invalid highlight range: [{word_idx_start}..{word_idx_end}] over {n} words"
+        )
+    h = {
+        "id": "h_" + secrets.token_hex(6),
+        "word_idx_start": int(word_idx_start),
+        "word_idx_end": int(word_idx_end),
+    }
+    data.setdefault("highlights", []).append(h)
+    return h
+
+
+def delete_highlight(data: dict, h_id: str) -> bool:
+    hs = data.get("highlights") or []
+    for i, h in enumerate(hs):
+        if h.get("id") == h_id:
+            del hs[i]
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Notes (TR-D)
+# ---------------------------------------------------------------------------
+
+
+def add_note(data: dict, word_idx: int, text: str) -> dict:
+    n = len(data.get("words") or [])
+    if word_idx < 0 or word_idx >= n:
+        raise ValueError(f"note word idx out of range: {word_idx}")
+    note = {
+        "id": "n_" + secrets.token_hex(6),
+        "word_idx": int(word_idx),
+        "text": str(text or ""),
+    }
+    data.setdefault("notes", []).append(note)
+    return note
+
+
+def update_note(data: dict, n_id: str, text: str) -> dict | None:
+    for note in data.get("notes") or []:
+        if note.get("id") == n_id:
+            note["text"] = str(text or "")
+            return note
+    return None
+
+
+def delete_note(data: dict, n_id: str) -> bool:
+    notes = data.get("notes") or []
+    for i, note in enumerate(notes):
+        if note.get("id") == n_id:
+            del notes[i]
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Per-segment reviewed flag (TR-D)
+# ---------------------------------------------------------------------------
+
+
+def set_segment_reviewed(data: dict, seg_idx: int, reviewed: bool) -> bool:
+    segments = data.get("segments") or []
+    if seg_idx < 0 or seg_idx >= len(segments):
+        raise ValueError(f"segment idx out of range: {seg_idx}")
+    new_val = bool(reviewed)
+    if segments[seg_idx].get("reviewed") == new_val:
+        return False
+    segments[seg_idx]["reviewed"] = new_val
+    return True
 
 
 def _format_timestamp(seconds: float, *, srt: bool) -> str:

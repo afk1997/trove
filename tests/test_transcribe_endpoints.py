@@ -244,6 +244,15 @@ def test_transcript_page_renders(client, tmp_path, monkeypatch):
     res = client.get("/transcript/t1")
     assert res.status_code == 200
     body = res.data.decode()
+    # v3 four-zone document layout
+    assert 'class="transcript-doc"' in body
+    assert 'id="t-doc-header"' in body
+    assert 'id="t-doc-toolbar"' in body
+    assert 'id="t-player-bar"' in body
+    assert 'id="t-body"' in body
+    # contenteditable paragraph + word spans
+    assert 'class="t-seg-body"' in body
+    assert 'contenteditable="plaintext-only"' in body
     assert "<video" in body or "<audio" in body
     assert 'data-start="0.0"' in body
     assert "hello" in body and "world" in body

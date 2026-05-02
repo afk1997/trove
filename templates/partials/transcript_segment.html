@@ -1,12 +1,30 @@
-{# One transcript segment row, including its speaker tag.
-   Variables:
-     seg, seg_idx, data
-#}
-<p class="t-segment" data-seg-idx="{{ seg_idx }}" data-seg-start="{{ seg.start }}">
-  <span class="t-speaker-tag{% if seg.speaker %} is-set{% endif %}"
-        data-seg-idx="{{ seg_idx }}"
-        tabindex="0"
-        role="button"
-        aria-label="set speaker">{%- if seg.speaker %}{{ seg.speaker }}{% else %}+ speaker{% endif -%}</span>
-  {% for idx in seg.word_idxs %}{% set w = data.words[idx] %}{% include "partials/transcript_word.html" %}{% if not loop.last %} {% endif %}{% endfor %}
-</p>
+{# v3 transcript segment — gutter (reviewed checkbox + timestamp + speaker)
+   beside a contenteditable paragraph. Variables: seg, seg_idx, data. #}
+{%- set _t = (seg.start | float) -%}
+{%- set _h = (_t // 3600) | int -%}
+{%- set _m = ((_t % 3600) // 60) | int -%}
+{%- set _s = (_t % 60) | int -%}
+<div class="t-segment{% if seg.reviewed %} is-reviewed{% endif %}{% if seg.speaker %} has-speaker{% endif %}"
+     data-seg-idx="{{ seg_idx }}"
+     data-seg-start="{{ seg.start }}">
+  <div class="t-seg-gutter" contenteditable="false">
+    <label class="t-seg-reviewed-wrap" title="mark reviewed">
+      <input type="checkbox" class="t-seg-reviewed"
+             {% if seg.reviewed %}checked{% endif %}
+             data-seg-idx="{{ seg_idx }}"
+             aria-label="mark segment {{ seg_idx }} reviewed">
+    </label>
+    <button type="button" class="t-seg-time"
+            data-seg-idx="{{ seg_idx }}"
+            data-time="{{ seg.start }}"
+            tabindex="-1"
+            title="seek to this segment">[{% if _h %}{{ '%d:%02d:%02d' | format(_h, _m, _s) }}{% else %}{{ '%02d:%02d' | format(_m, _s) }}{% endif %}]</button>
+    <button type="button" class="t-seg-speaker{% if seg.speaker %} is-set{% endif %}"
+            data-seg-idx="{{ seg_idx }}"
+            data-speaker="{{ seg.speaker or '' }}"
+            tabindex="-1"
+            title="rename speaker (applies globally)">{% if seg.speaker %}{{ seg.speaker }}{% else %}+ speaker{% endif %}</button>
+  </div>
+  <p class="t-seg-body" contenteditable="plaintext-only" spellcheck="false"
+     data-seg-idx="{{ seg_idx }}">{% for idx in seg.word_idxs %}{% set w = data.words[idx] %}{% include "partials/transcript_word.html" %}{% if not loop.last %} {% endif %}{% endfor %}</p>
+</div>

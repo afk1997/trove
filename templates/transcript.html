@@ -1,84 +1,110 @@
 {% extends "base.html" %}
-{% block title %}{{ parent.title }} · transcript · trove{% endblock %}
+{% block title %}{{ data.title or parent.title or "transcript" }} · trove{% endblock %}
 {% block content %}
-<main class="transcript-page" data-transcribe-id="{{ tj.id }}">
+{%- set _eff_title = data.title or parent.title or "untitled" -%}
+{%- set _dur = (data.duration | int) -%}
+{%- set _dur_h = _dur // 3600 -%}
+{%- set _dur_m = (_dur % 3600) // 60 -%}
+{%- set _dur_s = _dur % 60 -%}
+<main class="transcript-doc" data-transcribe-id="{{ tj.id }}">
 
-  <header class="transcript-head">
-    <div class="transcript-head-left">
-      <a class="transcript-mark" href="/">trove<span class="period">.</span></a>
-      <span class="transcript-breadcrumb">transcript</span>
+  {# === ZONE A: header (sticky) === #}
+  <header class="t-doc-header" id="t-doc-header">
+    <div class="t-doc-header-row1">
+      <a class="t-doc-mark" href="/">trove<span class="period">.</span></a>
+      <span class="t-doc-crumb">transcript</span>
+      <h1 class="t-doc-title" id="t-doc-title"
+          contenteditable="plaintext-only" spellcheck="false"
+          data-current="{{ _eff_title }}">{{ _eff_title }}</h1>
+      <span class="t-doc-saving" id="t-doc-saving" data-state="idle"
+            aria-live="polite" title="saving status">
+        <span class="t-doc-saving-dot"></span><span class="t-doc-saving-text">✓ saved</span>
+      </span>
     </div>
-    <div class="transcript-exports">
-      <a class="transcript-export" href="/api/transcribe/{{ tj.id }}/export.txt">.txt</a>
-      <a class="transcript-export" href="/api/transcribe/{{ tj.id }}/export.srt">.srt</a>
-      <a class="transcript-export" href="/api/transcribe/{{ tj.id }}/export.vtt">.vtt</a>
-    </div>
-  </header>
-
-  <div class="transcript-meta">
-    <span class="transcript-stamp">NO. 002 / 2026</span>
-    <h1 class="transcript-title">{{ parent.title or "untitled" }}</h1>
-    <p class="transcript-submeta">
-      {{ "%d:%02d" | format((data.duration | int) // 60, (data.duration | int) % 60) }}
-      <span class="sep">·</span> {{ (data.language or "—") | upper }}
-      <span class="sep">·</span> {{ tj.model_used }}
+    <p class="t-doc-meta">
+      <span>{% if _dur_h %}{{ '%d:%02d:%02d' | format(_dur_h, _dur_m, _dur_s) }}{% else %}{{ '%d:%02d' | format(_dur_m, _dur_s) }}{% endif %}</span>
+      <span class="sep">·</span> <span>{{ (data.language or "—") | upper }}</span>
+      <span class="sep">·</span> <span>{{ tj.model_used }}</span>
       {% if was_edited %}<span class="sep">·</span> <span class="t-edited-badge" id="t-edited-badge">edited</span>{% endif %}
     </p>
+  </header>
+
+  {# === ZONE B: toolbar === #}
+  <div class="t-doc-toolbar" id="t-doc-toolbar">
+    <div class="t-tb-group">
+      <button type="button" class="t-tb-btn" id="t-tb-search" title="search (⌘F)">⚲ search</button>
+      <button type="button" class="t-tb-btn" id="t-tb-find-replace" title="find & replace (⌘⇧F)">⇄ find/replace</button>
+    </div>
+    <div class="t-tb-group">
+      <button type="button" class="t-tb-btn" id="t-tb-undo" title="undo (⌘Z)">↶ undo</button>
+      <button type="button" class="t-tb-btn" id="t-tb-redo" title="redo (⌘⇧Z)">↷ redo</button>
+    </div>
+    <div class="t-tb-group t-tb-toggles">
+      <label class="t-tb-toggle"><input type="checkbox" id="t-tb-show-speakers" checked>speakers</label>
+      <label class="t-tb-toggle"><input type="checkbox" id="t-tb-show-times" checked>times</label>
+      <label class="t-tb-toggle" id="t-tb-follow-wrap"><input type="checkbox" id="t-tb-follow" checked>follow</label>
+    </div>
+    <div class="t-tb-group t-tb-right">
+      <details class="t-tb-export">
+        <summary class="t-tb-btn">⬇ export ▾</summary>
+        <div class="t-tb-export-menu">
+          <a href="/api/transcribe/{{ tj.id }}/export.txt">.txt</a>
+          <a href="/api/transcribe/{{ tj.id }}/export.srt">.srt</a>
+          <a href="/api/transcribe/{{ tj.id }}/export.vtt">.vtt</a>
+        </div>
+      </details>
+      <button type="button" class="t-tb-btn" id="t-help-btn" title="shortcuts (?)">?</button>
+    </div>
+    <div class="t-tb-search-bar" id="t-tb-search-bar" hidden>
+      <input id="t-search" type="search" placeholder="⚲ search transcript…" autocomplete="off">
+      <button type="button" id="t-prev" aria-label="previous">↑</button>
+      <button type="button" id="t-next" aria-label="next">↓</button>
+      <span id="t-search-count" aria-live="polite"></span>
+      <button type="button" id="t-tb-search-close" aria-label="close">×</button>
+    </div>
+    <div class="t-tb-fr-bar" id="t-fr-bar" hidden>
+      <input type="text" id="t-fr-find" placeholder="find…" autocomplete="off">
+      <input type="text" id="t-fr-replace" placeholder="replace…" autocomplete="off">
+      <label><input type="checkbox" id="t-fr-case"> case</label>
+      <button type="button" id="t-fr-go">replace all</button>
+      <button type="button" id="t-fr-close" aria-label="close">×</button>
+    </div>
   </div>
 
-  <div class="transcript-grid">
-    <aside class="transcript-media">
-      {% if is_audio %}
-        <audio id="t-player" controls preload="metadata" src="{{ media_url }}"></audio>
-      {% else %}
-        <video id="t-player" controls preload="metadata" src="{{ media_url }}"></video>
-      {% endif %}
-      <div class="t-speed-row" role="group" aria-label="playback speed">
-        <button type="button" class="t-speed" data-rate="0.5">0.5×</button>
-        <button type="button" class="t-speed" data-rate="1">1×</button>
-        <button type="button" class="t-speed" data-rate="1.25">1.25×</button>
-        <button type="button" class="t-speed" data-rate="1.5">1.5×</button>
-        <button type="button" class="t-speed" data-rate="2">2×</button>
-      </div>
-    </aside>
+  {# === ZONE C: compact sticky player === #}
+  <div class="t-player-bar" id="t-player-bar">
+    <button type="button" class="t-pb-play" id="t-pb-play" aria-label="play / pause">▶</button>
+    <input type="range" class="t-pb-scrub" id="t-pb-scrub" min="0" max="100" step="0.1" value="0" aria-label="seek">
+    <span class="t-pb-time" id="t-pb-time">0:00 / 0:00</span>
+    <div class="t-pb-speed" role="group" aria-label="playback speed">
+      <button type="button" class="t-pb-speed-btn" data-rate="0.5">0.5×</button>
+      <button type="button" class="t-pb-speed-btn is-active" data-rate="1">1×</button>
+      <button type="button" class="t-pb-speed-btn" data-rate="1.25">1.25×</button>
+      <button type="button" class="t-pb-speed-btn" data-rate="1.5">1.5×</button>
+      <button type="button" class="t-pb-speed-btn" data-rate="2">2×</button>
+    </div>
+    {% if is_audio %}
+      <audio id="t-player" preload="metadata" src="{{ media_url }}"></audio>
+    {% else %}
+      <video id="t-player" preload="metadata" src="{{ media_url }}" hidden></video>
+    {% endif %}
+  </div>
 
-    <section class="transcript-body">
-      <div class="t-find-replace" id="t-fr-bar" hidden>
-        <input type="text" id="t-fr-find" placeholder="find…" autocomplete="off">
-        <input type="text" id="t-fr-replace" placeholder="replace…" autocomplete="off">
-        <label class="t-fr-case"><input type="checkbox" id="t-fr-case"> case</label>
-        <button type="button" id="t-fr-go">replace all</button>
-        <button type="button" id="t-fr-close" aria-label="close" title="close (Esc)">×</button>
-      </div>
+  {# === ZONE D: document body === #}
+  <section class="transcript-body" id="t-body">
+    {% for seg in data.segments %}{% set seg_idx = loop.index0 %}{% include "partials/transcript_segment.html" %}{% endfor %}
+  </section>
 
-      <div class="transcript-search-row">
-        <label for="t-search" class="sr-only">Search transcript</label>
-        <input id="t-search" type="search" placeholder="⚲ search transcript…" autocomplete="off">
-        <button type="button" id="t-prev" class="t-search-nav" aria-label="Previous match">↑</button>
-        <button type="button" id="t-next" class="t-search-nav" aria-label="Next match">↓</button>
-        <span id="t-search-count" class="t-search-count" aria-live="polite"></span>
-        <label class="t-follow">
-          <input type="checkbox" id="t-follow" checked>
-          <span>follow along</span>
-        </label>
-        <button type="button" id="t-help-btn" class="t-help-btn" aria-label="keyboard shortcuts" title="shortcuts (?)">?</button>
-      </div>
+  <button type="button" class="t-jump-current" id="t-jump-current" hidden>↓ jump to current</button>
 
-      <div class="transcript-text" id="t-text">
-        {% for seg in data.segments %}{% set seg_idx = loop.index0 %}{% include "partials/transcript_segment.html" %}{% endfor %}
-      </div>
-    </section>
+  {% include "partials/transcript_selection_toolbar.html" %}
 
-    <aside class="t-bookmarks" id="t-bookmarks" aria-label="bookmarks">
-      <div class="t-bookmarks-head">
-        <span class="t-bookmarks-title">bookmarks</span>
-        <button type="button" id="t-bm-add" class="t-bm-add" title="add bookmark (Cmd+B)" aria-label="add bookmark">+</button>
-      </div>
-      <ul class="t-bookmarks-list" id="t-bookmarks-list">
-        {% for bm in data.bookmarks or [] %}{% include "partials/transcript_bookmark.html" %}{% endfor %}
-      </ul>
-      {% if not (data.bookmarks or []) %}<p class="t-bookmarks-empty" id="t-bookmarks-empty">no bookmarks yet · press ⌘B</p>{% endif %}
-    </aside>
+  <div class="t-context-menu" id="t-context-menu" role="menu" hidden>
+    <button type="button" data-act="copy" role="menuitem">copy</button>
+    <button type="button" data-act="highlight" role="menuitem">highlight</button>
+    <button type="button" data-act="bookmark" role="menuitem">bookmark</button>
+    <button type="button" data-act="note" role="menuitem">add note</button>
+    <button type="button" data-act="export-selection" role="menuitem">export selection</button>
   </div>
 
   <div class="t-toast-stack" id="t-toast-stack" aria-live="polite" aria-atomic="true"></div>
@@ -86,7 +112,7 @@
   <div class="modal-overlay" id="t-help-modal" hidden role="dialog" aria-label="keyboard shortcuts">
     <div class="modal t-shortcut-help" role="document">
       <div class="modal-head">
-        <span class="modal-stamp">HELP / 02</span>
+        <span class="modal-stamp">HELP</span>
         <h2>keyboard shortcuts</h2>
       </div>
       <div class="modal-body">
@@ -97,6 +123,9 @@
           <li><code>⌘F</code> <span>focus search</span></li>
           <li><code>⌘⇧F</code> <span>find &amp; replace</span></li>
           <li><code>⌘B</code> <span>bookmark current time</span></li>
+          <li><code>⌘Z</code> / <code>⌘⇧Z</code> <span>undo / redo</span></li>
+          <li><code>Enter</code> <span>split paragraph at cursor</span></li>
+          <li><code>Backspace</code> <span>(at start) merge with previous</span></li>
           <li><code>?</code> <span>open this dialog</span></li>
           <li><code>Esc</code> <span>close / cancel</span></li>
         </ul>
@@ -107,772 +136,863 @@
     </div>
   </div>
 
+  {# JSON sidecar — JS applies highlights & notes after initial render. #}
+  <script type="application/json" id="t-extras-json">{{ {"highlights": data.highlights or [], "notes": data.notes or []} | tojson }}</script>
 </main>
 
 <script nonce="{{ g.csp_nonce }}">
-  (function () {
-    const root = document.querySelector('.transcript-page');
-    const transcribeId = root ? root.dataset.transcribeId : '';
-    const player = document.getElementById('t-player');
-    const textRoot = document.getElementById('t-text');
-    const search = document.getElementById('t-search');
-    const prev = document.getElementById('t-prev');
-    const next = document.getElementById('t-next');
-    const countEl = document.getElementById('t-search-count');
-    const followToggle = document.getElementById('t-follow');
-    const toastStack = document.getElementById('t-toast-stack');
+(function () {
+  'use strict';
+  const root = document.querySelector('.transcript-doc');
+  if (!root) return;
+  const TID = root.dataset.transcribeId;
+  const player = document.getElementById('t-player');
+  const bodyEl = document.getElementById('t-body');
+  const headerSaving = document.getElementById('t-doc-saving');
+  const titleEl = document.getElementById('t-doc-title');
+  const toastStack = document.getElementById('t-toast-stack');
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!bodyEl || !player) return;
 
-    function liveWords() {
-      return Array.from(textRoot.querySelectorAll('.word:not(.is-deleted)'));
+  // ===== TOAST ============================================================
+  function toast(msg, kind) {
+    if (!toastStack) return;
+    const el = document.createElement('div');
+    el.className = 't-toast' + (kind === 'error' ? ' is-error' : '');
+    el.textContent = msg;
+    toastStack.appendChild(el);
+    setTimeout(function () { el.remove(); }, 2100);
+  }
+
+  // ===== SAVING STATUS STATE MACHINE ======================================
+  let inflight = 0;
+  function setSaving(state, text) {
+    if (!headerSaving) return;
+    headerSaving.dataset.state = state;
+    const t = headerSaving.querySelector('.t-doc-saving-text');
+    if (t) t.textContent = text || state;
+  }
+  function startReq() { inflight++; setSaving('saving', 'saving…'); }
+  function endReq(ok, errMsg) {
+    inflight = Math.max(0, inflight - 1);
+    if (!ok) { setSaving('error', "✕ couldn't save · click to retry"); return; }
+    if (inflight === 0) setSaving('saved', '✓ saved');
+  }
+  async function fetchTracked(url, opts) {
+    startReq();
+    try {
+      const res = await fetch(url, opts || {});
+      if (!res.ok) { endReq(false, String(res.status)); return res; }
+      endReq(true);
+      return res;
+    } catch (err) {
+      endReq(false, err && err.message);
+      return null;
     }
-
-    if (!player || !textRoot) return;
-
-    // ----- Toast (auto-save feedback) ----------------------------------
-    function toast(msg, kind) {
-      if (!toastStack) return;
-      const el = document.createElement('div');
-      el.className = 't-toast' + (kind === 'error' ? ' is-error' : '');
-      el.textContent = msg;
-      toastStack.appendChild(el);
-      // Remove after the CSS animation completes (matches 2s keyframe).
-      setTimeout(function () { el.remove(); }, 2100);
-    }
-
-    // ----- Double-click-to-seek (single click reserved for editing) ----
-    textRoot.addEventListener('dblclick', function (e) {
-      const w = e.target.closest('.word');
-      if (!w || w.classList.contains('is-editing')) return;
-      const t = parseFloat(w.dataset.start);
-      if (!isNaN(t)) {
-        player.currentTime = t;
-        player.play().catch(function () {});
-      }
+  }
+  if (headerSaving) headerSaving.addEventListener('click', function () {
+    if (headerSaving.dataset.state !== 'error') return;
+    // Re-fire runDiff on every segment. Because lastKnown was NOT advanced
+    // for segments whose ops failed (see runDiff), the same ops will be
+    // re-emitted; clean segments produce no ops.
+    bodyEl.querySelectorAll('.t-seg-body').forEach(function (p) {
+      const i = parseInt(p.dataset.segIdx, 10);
+      if (!isNaN(i)) runDiff(i);
     });
-    // Keyboard activation (Enter/Space) on a focused word also seeks; the
-    // edit flow takes over on a plain click.
-    textRoot.addEventListener('keydown', function (e) {
-      const w = e.target.closest('.word');
-      if (!w || w.classList.contains('is-editing')) return;
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        const t = parseFloat(w.dataset.start);
-        if (!isNaN(t)) {
-          player.currentTime = t;
-          player.play().catch(function () {});
-        }
-      }
+  });
+
+  // ===== LAST-KNOWN STATE (per segment) ===================================
+  const lastKnown = {};
+  function snapshotSegment(segIdx) {
+    const p = bodyEl.querySelector('.t-seg-body[data-seg-idx="' + segIdx + '"]');
+    if (!p) return [];
+    return Array.from(p.querySelectorAll('.word')).map(function (w) {
+      return { idx: parseInt(w.dataset.idx, 10), w: (w.textContent || '').trim() };
     });
-
-    // ----- Active-word highlight (binary search over live words) -------
-    let activeIdx = -1;
-    function findActive(t, words) {
-      let lo = 0, hi = words.length - 1, found = -1;
-      while (lo <= hi) {
-        const mid = (lo + hi) >> 1;
-        if (parseFloat(words[mid].dataset.start) <= t) { found = mid; lo = mid + 1; }
-        else { hi = mid - 1; }
-      }
-      return found;
-    }
-    player.addEventListener('timeupdate', function () {
-      const words = liveWords();
-      const idx = findActive(player.currentTime, words);
-      if (idx === activeIdx) return;
-      // Clear all is-active to be safe (DOM may have shifted after edits).
-      textRoot.querySelectorAll('.word.is-active').forEach(function (el) {
-        el.classList.remove('is-active');
-      });
-      activeIdx = idx;
-      if (idx >= 0 && words[idx]) {
-        words[idx].classList.add('is-active');
-        if (followToggle && followToggle.checked) {
-          words[idx].scrollIntoView({ block: 'center', behavior: 'smooth' });
-        }
-      }
+  }
+  function snapshotAllSegments() {
+    Object.keys(lastKnown).forEach(function (k) { delete lastKnown[k]; });
+    bodyEl.querySelectorAll('.t-seg-body').forEach(function (p) {
+      const i = parseInt(p.dataset.segIdx, 10);
+      if (!isNaN(i)) lastKnown[i] = snapshotSegment(i);
     });
+  }
+  snapshotAllSegments();
 
-    // ----- Search ------------------------------------------------------
-    let matchIdxs = [];
-    let currentMatch = -1;
-
-    function clearMatches() {
-      textRoot.querySelectorAll('.word.is-match, .word.is-current-match').forEach(function (w) {
-        w.classList.remove('is-match', 'is-current-match');
-      });
-      matchIdxs = [];
-      currentMatch = -1;
-      countEl.textContent = '';
-    }
-
-    function applySearch() {
-      const q = (search.value || '').trim().toLowerCase();
-      clearMatches();
-      if (!q) return;
-      const words = liveWords();
-      words.forEach(function (w, i) {
-        if (w.textContent.toLowerCase().indexOf(q) !== -1) {
-          w.classList.add('is-match');
-          matchIdxs.push(i);
-        }
-      });
-      countEl.textContent = matchIdxs.length ? matchIdxs.length + ' matches' : 'no matches';
-      if (matchIdxs.length) {
-        currentMatch = 0;
-        markCurrent();
-      }
-    }
-
-    function markCurrent() {
-      const words = liveWords();
-      words.forEach(function (w) { w.classList.remove('is-current-match'); });
-      if (currentMatch >= 0 && currentMatch < matchIdxs.length) {
-        const w = words[matchIdxs[currentMatch]];
-        if (w) {
-          w.classList.add('is-current-match');
-          w.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        }
-      }
-    }
-
-    function step(delta) {
-      if (!matchIdxs.length) return;
-      currentMatch = (currentMatch + delta + matchIdxs.length) % matchIdxs.length;
-      markCurrent();
-      const words = liveWords();
-      const w = words[matchIdxs[currentMatch]];
-      if (w) player.currentTime = parseFloat(w.dataset.start) || 0;
-    }
-
-    if (search) search.addEventListener('input', applySearch);
-    if (prev) prev.addEventListener('click', function () { step(-1); });
-    if (next) next.addEventListener('click', function () { step(+1); });
-
-    // Cmd/Ctrl + F focuses our search instead of browser find
-    document.addEventListener('keydown', function (e) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'f' && !e.shiftKey) {
-        // Don't hijack while editing a word.
-        if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('word-editor')) return;
-        e.preventDefault(); search && search.focus();
-      } else if (e.key === 'Enter' && document.activeElement === search) {
-        e.preventDefault(); step(e.shiftKey ? -1 : +1);
-      }
+  // ===== DIFF LOOP (PATCH set_text / DELETE per word) =====================
+  const diffTimers = {};
+  function scheduleDiff(segIdx) {
+    clearTimeout(diffTimers[segIdx]);
+    diffTimers[segIdx] = setTimeout(function () { runDiff(segIdx); }, 500);
+  }
+  async function runDiff(segIdx) {
+    delete diffTimers[segIdx];
+    const cur = snapshotSegment(segIdx);
+    const prev = lastKnown[segIdx] || [];
+    const prevByIdx = {}; prev.forEach(function (p) { prevByIdx[p.idx] = p; });
+    const curByIdx = {}; cur.forEach(function (c) { curByIdx[c.idx] = c; });
+    const ops = [];
+    prev.forEach(function (p) {
+      const c = curByIdx[p.idx];
+      if (!c || c.w === '') ops.push({ op: 'delete', idx: p.idx });
     });
-
-    // === EDIT ==========================================================
-    // Single-click a word -> swap span for an inline <input>; blur/Enter
-    // commits via PATCH and replaces the input with the server-rendered
-    // word fragment. Esc reverts. Tab moves to the next word.
-
-    let editingSpan = null;
-
-    function beginEdit(span) {
-      if (!span || span.classList.contains('is-editing') || span.classList.contains('is-deleted')) return;
-      const original = span.textContent;
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.value = original;
-      input.className = 'word-editor';
-      input.dataset.idx = span.dataset.idx;
-      input.dataset.original = original;
-      // Preserve timestamps + edited flag so cancel() can rebuild a fully
-      // functional span (click-to-seek + edited highlight survive Esc).
-      input.dataset.start = span.dataset.start || '';
-      input.dataset.end = span.dataset.end || '';
-      input.dataset.edited = span.classList.contains('is-edited') ? '1' : '';
-      input.size = Math.max(2, original.length + 1);
-      input.setAttribute('aria-label', 'edit word');
-      span.replaceWith(input);
-      editingSpan = input;
-      input.focus();
-      input.select();
-    }
-
-    async function commit(input, opts) {
-      opts = opts || {};
-      const idx = input.dataset.idx;
-      const newText = input.value;
-      const original = input.dataset.original;
-      // No change → just restore the original span (no PATCH).
-      if (newText === original) {
-        cancel(input);
-        return;
-      }
-      const body = new URLSearchParams();
-      body.set('w', newText);
-      try {
-        const res = await fetch('/api/transcribe/' + transcribeId + '/word/' + idx, {
+    cur.forEach(function (c) {
+      if (c.w === '') return;
+      const p = prevByIdx[c.idx];
+      if (p && p.w !== c.w) ops.push({ op: 'set_text', idx: c.idx, w: c.w });
+    });
+    if (!ops.length) return;
+    let allOk = true;
+    for (const op of ops) {
+      let res;
+      if (op.op === 'set_text') {
+        const qs = new URLSearchParams(); qs.set('w', op.w);
+        res = await fetchTracked('/api/transcribe/' + TID + '/word/' + op.idx, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: body.toString(),
+          body: qs.toString(),
         });
-        if (res.status === 409) {
-          toast("couldn't save · reload to refresh", 'error');
-          cancel(input);
-          return;
-        }
-        if (!res.ok) {
-          toast("couldn't save · " + res.status, 'error');
-          cancel(input);
-          return;
-        }
-        const html = await res.text();
-        const wrap = document.createElement('div');
-        wrap.innerHTML = html.trim();
-        const newSpan = wrap.firstElementChild;
-        input.replaceWith(newSpan);
-        editingSpan = null;
-        toast('saved · just now');
-        if (opts.advance) {
-          // Focus the next non-deleted word for fluent Tab+edit.
-          const all = liveWords();
-          const here = all.indexOf(newSpan);
-          const target = here >= 0 ? all[here + 1] : null;
-          if (target) {
-            target.focus();
-            beginEdit(target);
-          }
-        }
-      } catch (err) {
-        toast("couldn't save · network", 'error');
-        cancel(input);
+      } else if (op.op === 'delete') {
+        res = await fetchTracked('/api/transcribe/' + TID + '/word/' + op.idx,
+                                 { method: 'DELETE' });
       }
+      if (!res || !res.ok) { allOk = false; }
     }
-
-    function cancel(input) {
-      const span = document.createElement('span');
-      let cls = 'word';
-      if (input.dataset.edited) cls += ' is-edited';
-      span.className = cls;
-      span.tabIndex = 0;
-      span.setAttribute('role', 'button');
-      span.dataset.idx = input.dataset.idx;
-      if (input.dataset.start) span.dataset.start = input.dataset.start;
-      if (input.dataset.end) span.dataset.end = input.dataset.end;
-      span.textContent = input.dataset.original;
-      input.replaceWith(span);
-      editingSpan = null;
+    // Only advance lastKnown when ALL ops succeeded. On partial failure, leave
+    // it untouched so the next diff (or retry click) re-emits the same ops.
+    if (allOk) {
+      lastKnown[segIdx] = snapshotSegment(segIdx);
+      markEditedBadge();
     }
+  }
+  bodyEl.addEventListener('input', function (e) {
+    const p = e.target.closest('.t-seg-body');
+    if (!p) return;
+    const segIdx = parseInt(p.dataset.segIdx, 10);
+    if (!isNaN(segIdx)) scheduleDiff(segIdx);
+  });
 
-    textRoot.addEventListener('click', function (e) {
-      const w = e.target.closest('.word');
-      if (!w) return;
-      // Ignore clicks while we're already editing.
-      if (e.target.closest('.word-editor')) return;
+  // ===== ENTER (split) / BACKSPACE-AT-START (merge) =======================
+  bodyEl.addEventListener('keydown', function (e) {
+    const p = e.target.closest('.t-seg-body');
+    if (!p) return;
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      beginEdit(w);
-    });
-
-    document.addEventListener('keydown', function (e) {
-      const ed = document.activeElement;
-      if (!ed || !ed.classList || !ed.classList.contains('word-editor')) return;
-      if (e.key === 'Enter') {
+      doSplitAtCursor(p);
+    } else if (e.key === 'Backspace') {
+      const sel = window.getSelection();
+      if (sel && sel.isCollapsed && isCursorAtStart(p)) {
         e.preventDefault();
-        commit(ed, { advance: false });
-      } else if (e.key === 'Tab') {
-        e.preventDefault();
-        commit(ed, { advance: true });
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        cancel(ed);
-      }
-    });
-
-    // Blur is the catch-all auto-save (covers click-elsewhere).
-    textRoot.addEventListener('focusout', function (e) {
-      const ed = e.target;
-      if (!ed || !ed.classList || !ed.classList.contains('word-editor')) return;
-      // Defer one tick so a Tab keydown handler runs first if applicable.
-      setTimeout(function () {
-        if (document.body.contains(ed) && document.activeElement !== ed) {
-          commit(ed, { advance: false });
-        }
-      }, 0);
-    });
-
-    // === HANDLES (TR-E6) ==============================================
-    // A singleton floating bar with ✕ → + actions per word. Appears on
-    // hover, hides shortly after the pointer leaves both the word and
-    // the bar. Reduced-motion users get an instant reveal (no animation).
-
-    const handles = document.createElement('div');
-    handles.className = 'word-handles';
-    handles.setAttribute('role', 'toolbar');
-    handles.setAttribute('aria-label', 'word actions');
-    handles.innerHTML = ''
-      + '<button type="button" data-act="del" title="delete word" aria-label="delete">x</button>'
-      + '<button type="button" data-act="merge" title="merge with next" aria-label="merge with next">→</button>'
-      + '<button type="button" data-act="insert" title="insert after" aria-label="insert after">+</button>';
-    handles.style.display = 'none';
-    document.body.appendChild(handles);
-
-    let handleTarget = null;
-    let hideTimer = null;
-
-    function placeHandles(span) {
-      const r = span.getBoundingClientRect();
-      handles.style.left = (r.left + window.scrollX) + 'px';
-      handles.style.top = (r.top + window.scrollY - 28) + 'px';
-      handles.style.display = 'flex';
-      handleTarget = span;
-    }
-    function scheduleHide() {
-      clearTimeout(hideTimer);
-      hideTimer = setTimeout(function () {
-        if (!handles.matches(':hover') && (!handleTarget || !handleTarget.matches(':hover'))) {
-          handles.style.display = 'none';
-          handleTarget = null;
-        }
-      }, 180);
-    }
-    function hideHandlesNow() {
-      clearTimeout(hideTimer);
-      handles.style.display = 'none';
-      handleTarget = null;
-    }
-
-    textRoot.addEventListener('mouseover', function (e) {
-      const w = e.target.closest('.word');
-      if (!w || w.classList.contains('is-deleted')) return;
-      clearTimeout(hideTimer);
-      placeHandles(w);
-    });
-    textRoot.addEventListener('mouseout', function (e) {
-      if (!e.target.closest('.word')) return;
-      scheduleHide();
-    });
-    handles.addEventListener('mouseenter', function () { clearTimeout(hideTimer); });
-    handles.addEventListener('mouseleave', scheduleHide);
-
-    async function callJSON(url, method) {
-      try {
-        const res = await fetch(url, { method: method });
-        return res;
-      } catch (err) {
-        return null;
+        doMergePrev(p);
       }
     }
-    function spanFromHTML(html) {
+  });
+  function isCursorAtStart(p) {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return false;
+    const r = sel.getRangeAt(0).cloneRange();
+    r.selectNodeContents(p);
+    const sr = sel.getRangeAt(0);
+    r.setEnd(sr.startContainer, sr.startOffset);
+    return r.toString().length === 0;
+  }
+  function findWordIdxAtCursor(p) {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    let n = sel.getRangeAt(0).startContainer;
+    while (n && n !== p) {
+      if (n.nodeType === 1 && n.classList && n.classList.contains('word')) {
+        return parseInt(n.dataset.idx, 10);
+      }
+      n = n.parentNode;
+    }
+    let scan = sel.getRangeAt(0).startContainer;
+    if (scan && scan.nodeType === 3) scan = scan.previousSibling;
+    while (scan) {
+      if (scan.nodeType === 1 && scan.classList && scan.classList.contains('word')) {
+        return parseInt(scan.dataset.idx, 10);
+      }
+      scan = scan.previousSibling;
+    }
+    return null;
+  }
+  function flushPendingFor(segIdx) {
+    if (diffTimers[segIdx]) {
+      clearTimeout(diffTimers[segIdx]);
+      delete diffTimers[segIdx];
+      return runDiff(segIdx);
+    }
+    return Promise.resolve();
+  }
+  async function flushAllPending() {
+    // Flush every pending diff timer; structural ops (split/merge/rename)
+    // depend on the server having all in-flight word edits applied first.
+    const idxs = Object.keys(diffTimers).map(function (k) { return parseInt(k, 10); });
+    await Promise.all(idxs.map(flushPendingFor));
+  }
+  async function doSplitAtCursor(p) {
+    const segIdx = parseInt(p.dataset.segIdx, 10);
+    const after = findWordIdxAtCursor(p);
+    if (after == null) { toast('place cursor inside a word', 'error'); return; }
+    await flushAllPending();
+    const qs = new URLSearchParams(); qs.set('after_word_idx', after);
+    const res = await fetchTracked('/api/transcribe/' + TID + '/segment/' + segIdx + '/split', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: qs.toString(),
+    });
+    if (!res || !res.ok) return;
+    swapSegments(segIdx, await res.text(), 1);
+  }
+  async function doMergePrev(p) {
+    const segIdx = parseInt(p.dataset.segIdx, 10);
+    if (segIdx <= 0) return;
+    // Remember how many words the previous segment had — that's the index
+    // of the join point in the merged-segment word list, used to restore
+    // the cursor after the swap.
+    const joinAfter = (lastKnown[segIdx - 1] || []).length;
+    await flushAllPending();
+    const res = await fetchTracked('/api/transcribe/' + TID + '/segment/' + segIdx + '/merge-prev', {
+      method: 'POST',
+    });
+    if (!res || !res.ok) return;
+    swapSegments(segIdx - 1, await res.text(), 2, { mergeJoinAfter: joinAfter });
+  }
+  function swapSegments(startIdx, html, replaceCount, opts) {
+    opts = opts || {};
+    const segs = Array.from(bodyEl.querySelectorAll('.t-segment'));
+    const target = segs[startIdx];
+    if (!target) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = html.trim();
+    const newNodes = Array.from(wrap.children);
+    if (!newNodes.length) return;
+    target.replaceWith.apply(target, newNodes);
+    for (let i = 1; i < replaceCount; i++) {
+      const next = segs[startIdx + i];
+      if (next && next.parentNode) next.remove();
+    }
+    Array.from(bodyEl.querySelectorAll('.t-segment')).forEach(function (el, i) {
+      el.dataset.segIdx = i;
+      const innerP = el.querySelector('.t-seg-body');
+      if (innerP) innerP.dataset.segIdx = i;
+      const cb = el.querySelector('.t-seg-reviewed');
+      if (cb) cb.dataset.segIdx = i;
+      const tt = el.querySelector('.t-seg-time');
+      if (tt) tt.dataset.segIdx = i;
+      const sp = el.querySelector('.t-seg-speaker');
+      if (sp) sp.dataset.segIdx = i;
+    });
+    snapshotAllSegments();
+    markEditedBadge();
+    // Place cursor at the start of the new (right) segment after a split.
+    if (replaceCount === 1) {
+      const newP = bodyEl.querySelector('.t-seg-body[data-seg-idx="' + (startIdx + 1) + '"]');
+      if (newP) {
+        const sel = window.getSelection();
+        const rng = document.createRange();
+        rng.selectNodeContents(newP);
+        rng.collapse(true);
+        sel.removeAllRanges(); sel.addRange(rng);
+        newP.focus();
+      }
+    }
+    // Place cursor at the join point after a merge (end of last word that
+    // came from the previous segment in the now-merged paragraph).
+    if (replaceCount === 2 && typeof opts.mergeJoinAfter === 'number') {
+      const newP = bodyEl.querySelector('.t-seg-body[data-seg-idx="' + startIdx + '"]');
+      if (newP) {
+        const words = newP.querySelectorAll('.word');
+        const join = words[opts.mergeJoinAfter - 1] || words[words.length - 1];
+        if (join) {
+          const sel = window.getSelection();
+          const rng = document.createRange();
+          rng.selectNodeContents(join);
+          rng.collapse(false);
+          sel.removeAllRanges(); sel.addRange(rng);
+          newP.focus();
+        }
+      }
+    }
+  }
+
+  // ===== TITLE EDIT =======================================================
+  if (titleEl) {
+    let titleDebounce;
+    titleEl.addEventListener('input', function () {
+      clearTimeout(titleDebounce);
+      titleDebounce = setTimeout(function () {
+        const qs = new URLSearchParams();
+        qs.set('title', (titleEl.textContent || '').trim());
+        fetchTracked('/api/transcribe/' + TID + '/title', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: qs.toString(),
+        });
+      }, 500);
+    });
+    titleEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); titleEl.blur(); }
+    });
+  }
+
+  // ===== SPEAKER RENAME (global, on speaker label click) ==================
+  bodyEl.addEventListener('click', function (e) {
+    const btn = e.target.closest('.t-seg-speaker');
+    if (!btn) return;
+    e.preventDefault();
+    beginSpeakerEdit(btn);
+  });
+  function beginSpeakerEdit(btn) {
+    const old = btn.dataset.speaker || '';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 't-seg-speaker-input';
+    input.value = old;
+    input.placeholder = 'speaker';
+    input.setAttribute('aria-label', 'speaker name');
+    btn.replaceWith(input);
+    input.focus();
+    input.select();
+    let done = false;
+    async function commit() {
+      if (done) return; done = true;
+      const next = (input.value || '').trim();
+      if (next === old) { input.replaceWith(btn); return; }
+      // Speaker-rename re-renders affected segments; flush all pending word
+      // edits first so we don't overwrite unsaved text with stale server HTML.
+      await flushAllPending();
+      const qs = new URLSearchParams();
+      qs.set('old', old);
+      qs.set('new', next);
+      const res = await fetchTracked('/api/transcribe/' + TID + '/speaker-rename', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: qs.toString(),
+      });
+      if (!res || !res.ok) { input.replaceWith(btn); return; }
+      const j = await res.json();
       const wrap = document.createElement('div');
-      wrap.innerHTML = (html || '').trim();
-      return wrap.firstElementChild;
-    }
-
-    async function doDelete(span) {
-      const idx = span.dataset.idx;
-      hideHandlesNow();
-      const res = await callJSON('/api/transcribe/' + transcribeId + '/word/' + idx, 'DELETE');
-      if (!res || !res.ok) { toast("couldn't delete · " + (res ? res.status : 'network'), 'error'); return; }
-      const newSpan = spanFromHTML(await res.text());
-      if (newSpan) span.replaceWith(newSpan);
-      toast('deleted · just now');
-    }
-
-    async function doMerge(span) {
-      const idx = span.dataset.idx;
-      hideHandlesNow();
-      const res = await callJSON('/api/transcribe/' + transcribeId + '/word/' + idx + '/merge-next', 'POST');
-      if (!res || !res.ok) { toast("couldn't merge · " + (res ? res.status : 'network'), 'error'); return; }
-      const html = (await res.text()).trim();
-      const wrap = document.createElement('div');
-      wrap.innerHTML = html;
-      // Response: anchor span (primary swap) + peer span (hx-swap-oob).
-      Array.from(wrap.children).forEach(function (s) {
-        const i = s.dataset.idx;
-        const target = textRoot.querySelector('.word[data-idx="' + i + '"]');
-        s.removeAttribute('hx-swap-oob');
-        if (target) target.replaceWith(s);
+      wrap.innerHTML = (j.html || '').trim();
+      Array.from(wrap.children).forEach(function (newSeg) {
+        const i = newSeg.dataset.segIdx;
+        const target = bodyEl.querySelector('.t-segment[data-seg-idx="' + i + '"]');
+        if (target) target.replaceWith(newSeg);
       });
-      toast('merged · just now');
+      snapshotAllSegments();
+      markEditedBadge();
     }
-
-    function doInsertPrompt(anchor) {
-      const idx = anchor.dataset.idx;
-      hideHandlesNow();
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.className = 'word-editor';
-      input.placeholder = 'insert…';
-      input.size = 6;
-      input.setAttribute('aria-label', 'insert word after');
-      // Insert with a leading space so the new word renders separated.
-      const space = document.createTextNode(' ');
-      anchor.parentNode.insertBefore(space, anchor.nextSibling);
-      anchor.parentNode.insertBefore(input, space.nextSibling);
-      input.focus();
-
-      function cleanup() {
-        if (input.parentNode) input.remove();
-        if (space.parentNode) space.remove();
-      }
-      let committed = false;
-      async function commitInsert() {
-        if (committed) return; committed = true;
-        const text = input.value.trim();
-        if (!text) { cleanup(); return; }
-        const body = new URLSearchParams(); body.set('w', text);
-        try {
-          const res = await fetch('/api/transcribe/' + transcribeId + '/word/' + idx + '/insert-after', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString(),
-          });
-          if (!res.ok) { toast("couldn't insert · " + res.status, 'error'); cleanup(); return; }
-          const newSpan = spanFromHTML(await res.text());
-          if (newSpan) input.replaceWith(newSpan);
-          toast('inserted · just now');
-        } catch (err) {
-          toast("couldn't insert · network", 'error');
-          cleanup();
-        }
-      }
-      input.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') { e.preventDefault(); cleanup(); }
-        else if (e.key === 'Enter') { e.preventDefault(); commitInsert(); }
-      });
-      input.addEventListener('blur', function () {
-        setTimeout(function () { if (document.body.contains(input) && !committed) commitInsert(); }, 80);
-      });
-    }
-
-    handles.addEventListener('click', function (e) {
-      const btn = e.target.closest('button');
-      if (!btn || !handleTarget) return;
-      const target = handleTarget;
-      const act = btn.dataset.act;
-      if (act === 'del') doDelete(target);
-      else if (act === 'merge') doMerge(target);
-      else if (act === 'insert') doInsertPrompt(target);
+    input.addEventListener('blur', function () { setTimeout(commit, 80); });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); done = true; input.replaceWith(btn); }
     });
+  }
 
-    // === EDITED BADGE (TR-E12) ========================================
-    function markEdited() {
-      if (document.getElementById('t-edited-badge')) return;
-      const submeta = document.querySelector('.transcript-submeta');
-      if (!submeta) return;
-      submeta.insertAdjacentHTML(
-        'beforeend',
-        ' <span class="sep">·</span> <span class="t-edited-badge" id="t-edited-badge">edited</span>'
-      );
-    }
+  // ===== TIMESTAMP CLICK -> SEEK ==========================================
+  bodyEl.addEventListener('click', function (e) {
+    const t = e.target.closest('.t-seg-time');
+    if (!t) return;
+    e.preventDefault();
+    const time = parseFloat(t.dataset.time);
+    if (!isNaN(time)) { player.currentTime = time; player.play().catch(function () {}); }
+  });
 
-    // === SPEED (TR-E8) ================================================
-    const speedBtns = Array.from(document.querySelectorAll('.t-speed'));
-    const STORED_RATE = 'trove.playbackRate';
-    function applyRate(r) {
-      const rate = parseFloat(r) || 1;
-      try { if (player) player.playbackRate = rate; } catch (_) {}
-      speedBtns.forEach(function (b) {
-        b.classList.toggle('is-active', parseFloat(b.dataset.rate) === rate);
-      });
-      try { localStorage.setItem(STORED_RATE, String(rate)); } catch (_) {}
+  // ===== REVIEWED CHECKBOX ================================================
+  bodyEl.addEventListener('change', function (e) {
+    const cb = e.target.closest('.t-seg-reviewed');
+    if (!cb) return;
+    const segIdx = parseInt(cb.dataset.segIdx, 10);
+    const qs = new URLSearchParams(); qs.set('reviewed', cb.checked ? '1' : '0');
+    fetchTracked('/api/transcribe/' + TID + '/segment/' + segIdx + '/reviewed', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: qs.toString(),
+    }).then(function (res) {
+      if (!res || !res.ok) { cb.checked = !cb.checked; return; }
+      const seg = bodyEl.querySelector('.t-segment[data-seg-idx="' + segIdx + '"]');
+      if (seg) seg.classList.toggle('is-reviewed', cb.checked);
+    });
+  });
+
+  // ===== DOUBLE-CLICK WORD -> SEEK ========================================
+  bodyEl.addEventListener('dblclick', function (e) {
+    const w = e.target.closest('.word');
+    if (!w) return;
+    const t = parseFloat(w.dataset.start);
+    if (!isNaN(t)) { player.currentTime = t; player.play().catch(function () {}); }
+  });
+
+  // ===== ACTIVE WORD / SEGMENT TRACKING + FOLLOW-ALONG ====================
+  let activeIdx = -1;
+  function liveWords() {
+    return Array.from(bodyEl.querySelectorAll('.word:not([hidden])'));
+  }
+  function findActiveBin(t, words) {
+    let lo = 0, hi = words.length - 1, found = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (parseFloat(words[mid].dataset.start) <= t) { found = mid; lo = mid + 1; }
+      else { hi = mid - 1; }
     }
+    return found;
+  }
+  function updateActive() {
+    const words = liveWords();
+    const idx = findActiveBin(player.currentTime, words);
+    if (idx === activeIdx) return;
+    bodyEl.querySelectorAll('.word.is-active').forEach(function (w) { w.classList.remove('is-active'); });
+    bodyEl.querySelectorAll('.t-segment.is-active-segment').forEach(function (s) { s.classList.remove('is-active-segment'); });
+    activeIdx = idx;
+    if (idx >= 0 && words[idx]) {
+      words[idx].classList.add('is-active');
+      const seg = words[idx].closest('.t-segment');
+      if (seg) {
+        seg.classList.add('is-active-segment');
+        if (followToggle && followToggle.checked && !followingPaused) {
+          programmaticScroll = true;
+          seg.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
+          setTimeout(function () { programmaticScroll = false; }, 600);
+        }
+        updateJumpButton();
+      }
+    }
+  }
+  player.addEventListener('timeupdate', updateActive);
+
+  const followToggle = document.getElementById('t-tb-follow');
+  const followWrap = document.getElementById('t-tb-follow-wrap');
+  const jumpBtn = document.getElementById('t-jump-current');
+  let followingPaused = false;
+  let programmaticScroll = false;
+  let scrollDebounce;
+  window.addEventListener('scroll', function () {
+    if (programmaticScroll) return;
+    followingPaused = true;
+    if (followWrap) followWrap.classList.add('is-paused');
+    clearTimeout(scrollDebounce);
+    scrollDebounce = setTimeout(updateJumpButton, 150);
+  }, { passive: true });
+  function activeSegmentInView() {
+    const seg = bodyEl.querySelector('.t-segment.is-active-segment');
+    if (!seg) return true;
+    const r = seg.getBoundingClientRect();
+    return r.bottom > 0 && r.top < window.innerHeight;
+  }
+  function updateJumpButton() {
+    if (!jumpBtn) return;
+    const has = bodyEl.querySelector('.t-segment.is-active-segment');
+    jumpBtn.hidden = !(followingPaused && has && !activeSegmentInView());
+  }
+  if (jumpBtn) jumpBtn.addEventListener('click', function () {
+    const seg = bodyEl.querySelector('.t-segment.is-active-segment');
+    if (seg) {
+      programmaticScroll = true;
+      seg.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
+      setTimeout(function () { programmaticScroll = false; }, 600);
+    }
+    followingPaused = false;
+    if (followWrap) followWrap.classList.remove('is-paused');
+    jumpBtn.hidden = true;
+  });
+
+  // ===== CUSTOM PLAYER UI =================================================
+  const playBtn = document.getElementById('t-pb-play');
+  const scrub = document.getElementById('t-pb-scrub');
+  const timeDisp = document.getElementById('t-pb-time');
+  function fmt(s) {
+    if (!isFinite(s) || s < 0) s = 0;
+    const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
+  }
+  function refreshPlayer() {
+    if (timeDisp) timeDisp.textContent = fmt(player.currentTime) + ' / ' + fmt(player.duration);
+    if (scrub && player.duration) scrub.value = (player.currentTime / player.duration) * 100;
+    if (playBtn) playBtn.textContent = player.paused ? '▶' : '❚❚';
+  }
+  player.addEventListener('timeupdate', refreshPlayer);
+  player.addEventListener('loadedmetadata', refreshPlayer);
+  player.addEventListener('play', refreshPlayer);
+  player.addEventListener('pause', refreshPlayer);
+  if (playBtn) playBtn.addEventListener('click', function () {
+    if (player.paused) player.play().catch(function () {}); else player.pause();
+  });
+  if (scrub) scrub.addEventListener('input', function () {
+    if (player.duration) player.currentTime = (parseFloat(scrub.value) / 100) * player.duration;
+  });
+
+  // ===== SPEED PILLS (with localStorage persistence) ======================
+  const speedBtns = Array.from(document.querySelectorAll('.t-pb-speed-btn'));
+  const STORED_RATE = 'trove.playbackRate';
+  function applyRate(r) {
+    const rate = parseFloat(r) || 1;
+    try { player.playbackRate = rate; } catch (_) {}
     speedBtns.forEach(function (b) {
-      b.addEventListener('click', function () { applyRate(b.dataset.rate); });
+      b.classList.toggle('is-active', parseFloat(b.dataset.rate) === rate);
     });
-    try {
-      const stored = localStorage.getItem(STORED_RATE);
-      applyRate(stored ? parseFloat(stored) : 1);
-    } catch (_) { applyRate(1); }
+    try { localStorage.setItem(STORED_RATE, String(rate)); } catch (_) {}
+  }
+  speedBtns.forEach(function (b) {
+    b.addEventListener('click', function () { applyRate(b.dataset.rate); });
+  });
+  try {
+    const stored = localStorage.getItem(STORED_RATE);
+    applyRate(stored ? parseFloat(stored) : 1);
+  } catch (_) {}
 
-    // === SPEAKER (TR-E10) =============================================
-    function renderSpeakerTag(tag, value) {
-      tag.classList.toggle('is-set', !!value);
-      tag.textContent = value || '+ speaker';
-    }
-    function beginSpeakerEdit(tag) {
-      if (tag.querySelector('input')) return;
-      const segIdx = tag.dataset.segIdx;
-      const original = tag.classList.contains('is-set') ? tag.textContent.trim() : '';
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.value = original;
-      input.placeholder = 'speaker';
-      input.className = 'word-editor t-speaker-input';
-      input.size = Math.max(8, original.length + 2);
-      input.setAttribute('aria-label', 'speaker name');
-      tag.replaceChildren(input);
-      input.focus();
-      input.select();
-      let committed = false;
-      async function commitSpeaker() {
-        if (committed) return; committed = true;
-        const next = input.value.trim();
-        if (next === original) { renderSpeakerTag(tag, original); return; }
-        try {
-          const body = new URLSearchParams();
-          body.set('speaker', next);
-          body.set('propagate', '1');
-          const res = await fetch('/api/transcribe/' + transcribeId + '/segment/' + segIdx + '/speaker', {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString(),
-          });
-          if (!res.ok) { toast("couldn't update speaker · " + res.status, 'error'); renderSpeakerTag(tag, original); return; }
-          const html = (await res.text()).trim();
-          if (!html) { renderSpeakerTag(tag, next); return; }
-          const wrap = document.createElement('div');
-          wrap.innerHTML = html;
-          Array.from(wrap.children).forEach(function (newSeg) {
-            const i = newSeg.dataset.segIdx;
-            const target = textRoot.querySelector('.t-segment[data-seg-idx="' + i + '"]');
-            if (target) target.replaceWith(newSeg);
-          });
-          toast('speaker · just now');
-          markEdited();
-        } catch (err) {
-          toast("couldn't update speaker · network", 'error');
-          renderSpeakerTag(tag, original);
-        }
+  // ===== SEARCH ===========================================================
+  const searchBar = document.getElementById('t-tb-search-bar');
+  const searchInput = document.getElementById('t-search');
+  const searchOpenBtn = document.getElementById('t-tb-search');
+  const searchClose = document.getElementById('t-tb-search-close');
+  const sPrev = document.getElementById('t-prev');
+  const sNext = document.getElementById('t-next');
+  const countEl = document.getElementById('t-search-count');
+  let matchIdxs = [];
+  let currentMatch = -1;
+  function clearMatches() {
+    bodyEl.querySelectorAll('.word.is-match, .word.is-current-match').forEach(function (w) {
+      w.classList.remove('is-match', 'is-current-match');
+    });
+    matchIdxs = []; currentMatch = -1;
+    if (countEl) countEl.textContent = '';
+  }
+  function applySearch() {
+    if (!searchInput) return;
+    const q = (searchInput.value || '').trim().toLowerCase();
+    clearMatches();
+    if (!q) return;
+    const words = liveWords();
+    words.forEach(function (w, i) {
+      if ((w.textContent || '').toLowerCase().indexOf(q) !== -1) {
+        w.classList.add('is-match');
+        matchIdxs.push(i);
       }
-      input.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') { e.preventDefault(); commitSpeaker(); }
-        else if (e.key === 'Escape') { e.preventDefault(); committed = true; renderSpeakerTag(tag, original); }
-      });
-      input.addEventListener('blur', function () {
-        setTimeout(function () { if (!committed) commitSpeaker(); }, 80);
-      });
+    });
+    if (countEl) countEl.textContent = matchIdxs.length ? matchIdxs.length + ' matches' : 'no matches';
+    if (matchIdxs.length) { currentMatch = 0; markCurrent(); }
+  }
+  function markCurrent() {
+    const words = liveWords();
+    words.forEach(function (w) { w.classList.remove('is-current-match'); });
+    if (currentMatch >= 0 && currentMatch < matchIdxs.length) {
+      const w = words[matchIdxs[currentMatch]];
+      if (w) {
+        w.classList.add('is-current-match');
+        programmaticScroll = true;
+        w.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
+        setTimeout(function () { programmaticScroll = false; }, 600);
+      }
     }
-    textRoot.addEventListener('click', function (e) {
-      const tag = e.target.closest('.t-speaker-tag');
-      if (!tag) return;
+  }
+  function searchStep(d) {
+    if (!matchIdxs.length) return;
+    currentMatch = (currentMatch + d + matchIdxs.length) % matchIdxs.length;
+    markCurrent();
+  }
+  function openSearch() { if (searchBar) { searchBar.hidden = false; if (searchInput) searchInput.focus(); } }
+  function closeSearch() { if (searchBar) searchBar.hidden = true; clearMatches(); }
+  if (searchOpenBtn) searchOpenBtn.addEventListener('click', openSearch);
+  if (searchClose) searchClose.addEventListener('click', closeSearch);
+  if (searchInput) searchInput.addEventListener('input', applySearch);
+  if (sPrev) sPrev.addEventListener('click', function () { searchStep(-1); });
+  if (sNext) sNext.addEventListener('click', function () { searchStep(+1); });
+
+  // ===== FIND-REPLACE =====================================================
+  const frBar = document.getElementById('t-fr-bar');
+  const frFind = document.getElementById('t-fr-find');
+  const frRepl = document.getElementById('t-fr-replace');
+  const frCase = document.getElementById('t-fr-case');
+  const frGo = document.getElementById('t-fr-go');
+  const frClose = document.getElementById('t-fr-close');
+  const frBtn = document.getElementById('t-tb-find-replace');
+  function openFR() { if (frBar) { frBar.hidden = false; if (frFind) frFind.focus(); } }
+  function closeFR() { if (frBar) frBar.hidden = true; }
+  if (frBtn) frBtn.addEventListener('click', openFR);
+  if (frClose) frClose.addEventListener('click', closeFR);
+  if (frGo) frGo.addEventListener('click', async function () {
+    const find = (frFind.value || '').trim();
+    if (!find) return;
+    const qs = new URLSearchParams();
+    qs.set('find', find);
+    qs.set('replace', frRepl.value || '');
+    if (frCase && frCase.checked) qs.set('case_sensitive', '1');
+    const res = await fetchTracked('/api/transcribe/' + TID + '/find-replace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: qs.toString(),
+    });
+    if (!res || !res.ok) return;
+    const j = await res.json();
+    toast(j.count + ' replaced');
+    Object.keys(j.fragments || {}).forEach(function (idx) {
+      const target = bodyEl.querySelector('.word[data-idx="' + idx + '"]');
+      if (!target) return;
+      const wrap = document.createElement('div');
+      wrap.innerHTML = j.fragments[idx].trim();
+      const ne = wrap.firstElementChild;
+      if (ne) target.replaceWith(ne);
+    });
+    snapshotAllSegments();
+    markEditedBadge();
+  });
+
+  // ===== SELECTION TOOLBAR + CONTEXT MENU =================================
+  const selToolbar = document.getElementById('t-selection-toolbar');
+  const ctxMenu = document.getElementById('t-context-menu');
+  function getSelectionWordRange() {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+    const range = sel.getRangeAt(0);
+    if (!bodyEl.contains(range.commonAncestorContainer)) return null;
+    const start = wordIdxAtNode(range.startContainer, true);
+    const end = wordIdxAtNode(range.endContainer, false);
+    if (start == null || end == null) return null;
+    return { start: Math.min(start, end), end: Math.max(start, end), text: sel.toString() };
+  }
+  function wordIdxAtNode(node, forward) {
+    let n = node;
+    while (n) {
+      if (n.nodeType === 1 && n.classList && n.classList.contains('word')) {
+        return parseInt(n.dataset.idx, 10);
+      }
+      n = n.parentNode;
+    }
+    let scan = node.nodeType === 3 ? node.parentNode : node;
+    scan = scan && scan[forward ? 'nextElementSibling' : 'previousElementSibling'];
+    while (scan) {
+      if (scan.classList && scan.classList.contains('word')) return parseInt(scan.dataset.idx, 10);
+      scan = scan[forward ? 'nextElementSibling' : 'previousElementSibling'];
+    }
+    return null;
+  }
+  function placeSelToolbar() {
+    if (!selToolbar) return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) { selToolbar.hidden = true; return; }
+    const range = sel.getRangeAt(0);
+    if (!bodyEl.contains(range.commonAncestorContainer)) { selToolbar.hidden = true; return; }
+    const r = range.getBoundingClientRect();
+    selToolbar.style.left = Math.max(8, r.left + window.scrollX + r.width / 2 - 100) + 'px';
+    selToolbar.style.top = Math.max(8, r.top + window.scrollY - 40) + 'px';
+    selToolbar.hidden = false;
+  }
+  document.addEventListener('selectionchange', function () { setTimeout(placeSelToolbar, 0); });
+  if (selToolbar) selToolbar.addEventListener('mousedown', function (e) { e.preventDefault(); });
+  if (selToolbar) selToolbar.addEventListener('click', function (e) {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    handleSelAction(btn.dataset.act);
+  });
+  bodyEl.addEventListener('contextmenu', function (e) {
+    const r = getSelectionWordRange();
+    if (!r) return;
+    e.preventDefault();
+    if (!ctxMenu) return;
+    ctxMenu.style.left = e.pageX + 'px';
+    ctxMenu.style.top = e.pageY + 'px';
+    ctxMenu.hidden = false;
+  });
+  document.addEventListener('click', function (e) {
+    if (ctxMenu && !ctxMenu.contains(e.target)) ctxMenu.hidden = true;
+  });
+  if (ctxMenu) ctxMenu.addEventListener('click', function (e) {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    handleSelAction(btn.dataset.act);
+    ctxMenu.hidden = true;
+  });
+  function handleSelAction(act) {
+    const r = getSelectionWordRange();
+    if (!r) return;
+    if (act === 'copy') {
+      navigator.clipboard.writeText(r.text).then(function () { toast('copied'); });
+    } else if (act === 'highlight') {
+      doHighlight(r);
+    } else if (act === 'bookmark') {
+      const w = bodyEl.querySelector('.word[data-idx="' + r.start + '"]');
+      const t = w ? parseFloat(w.dataset.start) : 0;
+      doBookmark(t, r.text.slice(0, 80));
+    } else if (act === 'note') {
+      doNotePrompt(r.start);
+    } else if (act === 'export-selection') {
+      doExportSelection(r);
+    }
+    if (selToolbar) selToolbar.hidden = true;
+  }
+
+  // ===== HIGHLIGHTS =======================================================
+  async function doHighlight(r) {
+    const qs = new URLSearchParams();
+    qs.set('word_idx_start', r.start);
+    qs.set('word_idx_end', r.end);
+    const res = await fetchTracked('/api/transcribe/' + TID + '/highlight', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: qs.toString(),
+    });
+    if (!res || !res.ok) return;
+    wrapHighlight(await res.json());
+    toast('highlighted');
+  }
+  function wrapHighlight(h) {
+    for (let i = h.word_idx_start; i <= h.word_idx_end; i++) {
+      const w = bodyEl.querySelector('.word[data-idx="' + i + '"]');
+      if (!w) continue;
+      if (w.parentNode && w.parentNode.tagName === 'MARK' &&
+          w.parentNode.dataset.hId === h.id) continue;
+      const mark = document.createElement('mark');
+      mark.className = 'is-highlight';
+      mark.dataset.hId = h.id;
+      w.parentNode.insertBefore(mark, w);
+      mark.appendChild(w);
+    }
+  }
+
+  // ===== NOTES ============================================================
+  async function doNotePrompt(wordIdx) {
+    const text = window.prompt('note text:');
+    if (text == null) return;
+    const qs = new URLSearchParams();
+    qs.set('word_idx', wordIdx);
+    qs.set('text', text);
+    const res = await fetchTracked('/api/transcribe/' + TID + '/note', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: qs.toString(),
+    });
+    if (!res || !res.ok) return;
+    addNoteMarker(await res.json());
+    toast('note saved');
+  }
+  function addNoteMarker(note) {
+    const w = bodyEl.querySelector('.word[data-idx="' + note.word_idx + '"]');
+    if (!w) return;
+    if (w.nextSibling && w.nextSibling.classList && w.nextSibling.classList.contains('t-note-marker')) return;
+    const sup = document.createElement('sup');
+    sup.className = 't-note-marker';
+    sup.dataset.noteId = note.id;
+    sup.title = note.text || '';
+    sup.textContent = '[note]';
+    sup.contentEditable = 'false';
+    w.parentNode.insertBefore(sup, w.nextSibling);
+  }
+
+  // ===== BOOKMARK (write-only in v3 — no list UI here) ====================
+  async function doBookmark(t, note) {
+    const qs = new URLSearchParams();
+    qs.set('time', String(t || 0));
+    qs.set('note', note || '');
+    const res = await fetchTracked('/api/transcribe/' + TID + '/bookmark', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: qs.toString(),
+    });
+    if (res && res.ok) toast('bookmarked');
+  }
+
+  // ===== EXPORT SELECTION =================================================
+  async function doExportSelection(r) {
+    const qs = new URLSearchParams();
+    qs.set('word_idx_start', r.start);
+    qs.set('word_idx_end', r.end);
+    const res = await fetchTracked('/api/transcribe/' + TID + '/export-selection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: qs.toString(),
+    });
+    if (!res || !res.ok) return;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'selection.txt';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // ===== INITIAL HIGHLIGHTS / NOTES =======================================
+  try {
+    const extras = JSON.parse(document.getElementById('t-extras-json').textContent);
+    (extras.highlights || []).forEach(wrapHighlight);
+    (extras.notes || []).forEach(addNoteMarker);
+  } catch (_) {}
+
+  // ===== EDITED BADGE =====================================================
+  function markEditedBadge() {
+    if (document.getElementById('t-edited-badge')) return;
+    const meta = document.querySelector('.t-doc-meta');
+    if (!meta) return;
+    meta.insertAdjacentHTML('beforeend',
+      ' <span class="sep">·</span> <span class="t-edited-badge" id="t-edited-badge">edited</span>');
+  }
+
+  // ===== SHOW/HIDE TOGGLES ================================================
+  const showSpeakers = document.getElementById('t-tb-show-speakers');
+  const showTimes = document.getElementById('t-tb-show-times');
+  if (showSpeakers) showSpeakers.addEventListener('change', function () {
+    document.body.classList.toggle('t-hide-speakers', !showSpeakers.checked);
+  });
+  if (showTimes) showTimes.addEventListener('change', function () {
+    document.body.classList.toggle('t-hide-times', !showTimes.checked);
+  });
+
+  // ===== UNDO / REDO ======================================================
+  const undoBtn = document.getElementById('t-tb-undo');
+  const redoBtn = document.getElementById('t-tb-redo');
+  if (undoBtn) undoBtn.addEventListener('click', function () { document.execCommand('undo'); });
+  if (redoBtn) redoBtn.addEventListener('click', function () { document.execCommand('redo'); });
+
+  // ===== KEYBOARD =========================================================
+  const helpModal = document.getElementById('t-help-modal');
+  const helpBtn = document.getElementById('t-help-btn');
+  const helpClose = document.getElementById('t-help-close');
+  function openHelp() { if (helpModal) helpModal.hidden = false; }
+  function closeHelp() { if (helpModal) helpModal.hidden = true; }
+  if (helpBtn) helpBtn.addEventListener('click', openHelp);
+  if (helpClose) helpClose.addEventListener('click', closeHelp);
+  if (helpModal) helpModal.addEventListener('click', function (e) {
+    if (e.target === helpModal) closeHelp();
+  });
+  function isTypingTarget(el) {
+    if (!el) return false;
+    if (el.isContentEditable) return true;
+    const t = (el.tagName || '').toLowerCase();
+    return t === 'input' || t === 'textarea' || t === 'select';
+  }
+  document.addEventListener('keydown', function (e) {
+    const inText = isTypingTarget(document.activeElement);
+    const k = e.key.toLowerCase();
+    if ((e.metaKey || e.ctrlKey) && k === 'f' && !e.shiftKey) {
+      e.preventDefault(); openSearch();
+    } else if ((e.metaKey || e.ctrlKey) && k === 'f' && e.shiftKey) {
+      e.preventDefault(); openFR();
+    } else if ((e.metaKey || e.ctrlKey) && k === 'b') {
+      e.preventDefault(); doBookmark(player.currentTime, '');
+    } else if (e.key === 'Escape') {
+      if (helpModal && !helpModal.hidden) closeHelp();
+      else if (frBar && !frBar.hidden) closeFR();
+      else if (searchBar && !searchBar.hidden) closeSearch();
+      else if (ctxMenu && !ctxMenu.hidden) ctxMenu.hidden = true;
+      else if (selToolbar && !selToolbar.hidden) selToolbar.hidden = true;
+    } else if (e.key === '?' && !inText) {
+      e.preventDefault(); openHelp();
+    } else if (!inText && (e.key === ' ' || k === 'k')) {
       e.preventDefault();
-      e.stopPropagation();
-      beginSpeakerEdit(tag);
-    });
+      if (player.paused) player.play().catch(function () {}); else player.pause();
+    } else if (!inText && k === 'j') {
+      e.preventDefault(); player.currentTime = Math.max(0, player.currentTime - 5);
+    } else if (!inText && k === 'l') {
+      e.preventDefault(); player.currentTime = player.currentTime + 5;
+    } else if (!inText && e.key === ',') {
+      e.preventDefault(); applyRate(Math.max(0.25, player.playbackRate - 0.25));
+    } else if (!inText && e.key === '.') {
+      e.preventDefault(); applyRate(Math.min(4, player.playbackRate + 0.25));
+    }
+  });
 
-    // === FIND/REPLACE (TR-E7) =========================================
-    const frBar = document.getElementById('t-fr-bar');
-    const frFind = document.getElementById('t-fr-find');
-    const frReplace = document.getElementById('t-fr-replace');
-    const frCase = document.getElementById('t-fr-case');
-    const frGo = document.getElementById('t-fr-go');
-    const frClose = document.getElementById('t-fr-close');
-    let lastReplace = null;
-    function openFR() { if (frBar) { frBar.hidden = false; frFind.focus(); frFind.select(); } }
-    function closeFR() { if (frBar) frBar.hidden = true; }
-    async function runFR(find, replace, caseSensitive) {
-      if (!find) return;
-      const body = new URLSearchParams();
-      body.set('find', find);
-      body.set('replace', replace);
-      if (caseSensitive) body.set('case_sensitive', '1');
-      try {
-        const res = await fetch('/api/transcribe/' + transcribeId + '/find-replace', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: body.toString(),
-        });
-        if (!res.ok) { toast("couldn't replace · " + res.status, 'error'); return; }
-        const data = await res.json();
-        Object.keys(data.fragments || {}).forEach(function (idx) {
-          const target = textRoot.querySelector('.word[data-idx="' + idx + '"]');
-          if (!target) return;
-          const wrap = document.createElement('div');
-          wrap.innerHTML = data.fragments[idx];
-          if (wrap.firstElementChild) target.replaceWith(wrap.firstElementChild);
-        });
-        toast(data.count + ' replaced · just now');
-        if (data.count > 0) {
-          lastReplace = { find: find, replace: replace, case: !!caseSensitive };
-          markEdited();
-        }
-      } catch (err) {
-        toast("couldn't replace · network", 'error');
-      }
-    }
-    if (frGo) frGo.addEventListener('click', function () {
-      runFR(frFind.value, frReplace.value, frCase && frCase.checked);
-    });
-    if (frClose) frClose.addEventListener('click', closeFR);
-    function frKeyHandler(e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        runFR(frFind.value, frReplace.value, frCase && frCase.checked);
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        closeFR();
-      }
-    }
-    if (frFind) frFind.addEventListener('keydown', frKeyHandler);
-    if (frReplace) frReplace.addEventListener('keydown', frKeyHandler);
-
-    // === BOOKMARKS (TR-E11) ===========================================
-    const bmList = document.getElementById('t-bookmarks-list');
-    const bmAdd = document.getElementById('t-bm-add');
-    function clearBmEmpty() {
-      const e = document.getElementById('t-bookmarks-empty');
-      if (e) e.remove();
-    }
-    function insertBookmarkSorted(li) {
-      if (!bmList || !li) return;
-      const t = parseFloat(li.dataset.time) || 0;
-      const items = Array.from(bmList.querySelectorAll('.t-bookmark'));
-      let inserted = false;
-      for (const it of items) {
-        if ((parseFloat(it.dataset.time) || 0) > t) {
-          bmList.insertBefore(li, it);
-          inserted = true;
-          break;
-        }
-      }
-      if (!inserted) bmList.appendChild(li);
-    }
-    async function createBookmark(time, note) {
-      const body = new URLSearchParams();
-      body.set('time', String(time || 0));
-      body.set('note', note || '');
-      try {
-        const res = await fetch('/api/transcribe/' + transcribeId + '/bookmark', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: body.toString(),
-        });
-        if (!res.ok) { toast("couldn't bookmark · " + res.status, 'error'); return; }
-        const wrap = document.createElement('div');
-        wrap.innerHTML = (await res.text()).trim();
-        const li = wrap.firstElementChild;
-        insertBookmarkSorted(li);
-        clearBmEmpty();
-        toast('bookmark · just now');
-        markEdited();
-      } catch (err) { toast("couldn't bookmark · network", 'error'); }
-    }
-    function bmShortcut() {
-      const t = (player && !isNaN(player.currentTime)) ? player.currentTime : 0;
-      createBookmark(t, '');
-    }
-    if (bmAdd) bmAdd.addEventListener('click', bmShortcut);
-    if (bmList) {
-      bmList.addEventListener('click', async function (e) {
-        const seekBtn = e.target.closest('.t-bm-time');
-        const delBtn = e.target.closest('.t-bm-del');
-        if (seekBtn) {
-          const t = parseFloat(seekBtn.dataset.time);
-          if (!isNaN(t) && player) {
-            player.currentTime = t;
-            if (player.paused) player.play().catch(function () {});
-          }
-        } else if (delBtn) {
-          const id = delBtn.dataset.bmId;
-          const li = delBtn.closest('.t-bookmark');
-          try {
-            const res = await fetch('/api/transcribe/' + transcribeId + '/bookmark/' + id, { method: 'DELETE' });
-            if (!res.ok) { toast("couldn't delete · " + res.status, 'error'); return; }
-            if (li) li.remove();
-            toast('deleted · just now');
-          } catch (err) { toast("couldn't delete · network", 'error'); }
-        }
-      });
-      bmList.addEventListener('dblclick', function (e) {
-        const noteSpan = e.target.closest('.t-bm-note');
-        if (noteSpan) beginBookmarkNoteEdit(noteSpan);
-      });
-    }
-    function beginBookmarkNoteEdit(span) {
-      const id = span.dataset.bmId;
-      const original = span.textContent === '(empty)' ? '' : span.textContent;
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.value = original;
-      input.className = 'word-editor';
-      span.replaceWith(input);
-      input.focus();
-      input.select();
-      let committed = false;
-      function restore() {
-        const newSpan = document.createElement('span');
-        newSpan.className = 't-bm-note';
-        newSpan.dataset.bmId = id;
-        newSpan.tabIndex = 0;
-        newSpan.setAttribute('role', 'button');
-        newSpan.textContent = original || '(empty)';
-        if (input.parentNode) input.replaceWith(newSpan);
-      }
-      async function commit() {
-        if (committed) return; committed = true;
-        const next = input.value;
-        try {
-          const body = new URLSearchParams();
-          body.set('note', next);
-          const res = await fetch('/api/transcribe/' + transcribeId + '/bookmark/' + id, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString(),
-          });
-          if (!res.ok) { toast("couldn't update · " + res.status, 'error'); restore(); return; }
-          const wrap = document.createElement('div');
-          wrap.innerHTML = (await res.text()).trim();
-          const newLi = wrap.firstElementChild;
-          const oldLi = bmList.querySelector('.t-bookmark[data-bm-id="' + id + '"]');
-          if (newLi && oldLi) oldLi.replaceWith(newLi);
-          else if (newLi) bmList.appendChild(newLi);
-          toast('updated · just now');
-        } catch (err) {
-          toast("couldn't update · network", 'error');
-          restore();
-        }
-      }
-      input.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') { e.preventDefault(); commit(); }
-        else if (e.key === 'Escape') { e.preventDefault(); committed = true; restore(); }
-      });
-      input.addEventListener('blur', function () {
-        setTimeout(function () { if (!committed) commit(); }, 80);
-      });
-    }
-
-    // === KEYBOARD (TR-E9) =============================================
-    const helpModal = document.getElementById('t-help-modal');
-    const helpBtn = document.getElementById('t-help-btn');
-    const helpClose = document.getElementById('t-help-close');
-    function openHelp() { if (helpModal) helpModal.hidden = false; }
-    function closeHelp() { if (helpModal) helpModal.hidden = true; }
-    if (helpBtn) helpBtn.addEventListener('click', openHelp);
-    if (helpClose) helpClose.addEventListener('click', closeHelp);
-    if (helpModal) helpModal.addEventListener('click', function (e) {
-      if (e.target === helpModal) closeHelp();
-    });
-    function isFormEl(el) {
-      if (!el) return false;
-      const t = el.tagName;
-      return t === 'INPUT' || t === 'TEXTAREA' || el.isContentEditable;
-    }
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && helpModal && !helpModal.hidden) {
-        e.preventDefault(); closeHelp(); return;
-      }
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
-        e.preventDefault();
-        if (frBar && frBar.hidden) openFR(); else closeFR();
-        return;
-      }
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'b') {
-        e.preventDefault(); bmShortcut(); return;
-      }
-      if (isFormEl(document.activeElement)) return;
-      const k = e.key.toLowerCase();
-      if (e.key === ' ' || k === 'k') {
-        e.preventDefault();
-        if (!player) return;
-        if (player.paused) player.play().catch(function () {}); else player.pause();
-      } else if (k === 'j') {
-        e.preventDefault();
-        if (player) player.currentTime = Math.max(0, player.currentTime - 5);
-      } else if (k === 'l') {
-        e.preventDefault();
-        if (player) player.currentTime = (player.currentTime || 0) + 5;
-      } else if (e.key === ',') {
-        e.preventDefault();
-        applyRate(Math.max(0.25, (player && player.playbackRate ? player.playbackRate : 1) - 0.25));
-      } else if (e.key === '.') {
-        e.preventDefault();
-        applyRate(Math.min(4, (player && player.playbackRate ? player.playbackRate : 1) + 0.25));
-      } else if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
-        e.preventDefault();
-        openHelp();
-      }
-    });
-  })();
+  // ===== INIT =============================================================
+  setSaving('saved', '✓ saved');
+  refreshPlayer();
+})();
 </script>
 {% endblock %}

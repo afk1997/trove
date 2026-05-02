@@ -779,6 +779,230 @@ def create_app() -> Flask:
             _save_after_edit(data, base)
         return "", 200
 
+    # ----- transcript document endpoints (TR-D) ---------------------------
+
+    def _render_segments(data, indices):
+        """Render concatenated segment partials for the given segment indices."""
+        parts = []
+        for idx in indices:
+            if 0 <= idx < len(data.get("segments") or []):
+                parts.append(render_template(
+                    "partials/transcript_segment.html",
+                    seg=data["segments"][idx],
+                    seg_idx=idx,
+                    data=data,
+                ))
+        return "".join(parts)
+
+    @app.patch("/api/transcribe/<transcribe_id>/title")
+    @token_required
+    def api_transcript_title(transcribe_id):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        title = request.form.get("title")
+        if title is None:
+            return jsonify({"error": "missing title"}), 400
+        with _txn_lock(base):
+            data = transcript_io.load(base + ".words.json")
+            stored = transcript_io.set_title(data, title)
+            _save_after_edit(data, base)
+        # Echo back the resolved title (parent.title fallback when blank).
+        effective = stored or (parent.title or "untitled")
+        return jsonify({"title": stored, "effective": effective})
+
+    @app.post("/api/transcribe/<transcribe_id>/segment/<int:seg_idx>/split")
+    @token_required
+    def api_segment_split(transcribe_id, seg_idx):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        try:
+            after = int(request.form.get("after_word_idx", ""))
+        except (TypeError, ValueError):
+            return jsonify({"error": "missing or invalid after_word_idx"}), 400
+        with _txn_lock(base):
+            data = transcript_io.load(base + ".words.json")
+            try:
+                left, right = transcript_io.split_segment_at_word(data, seg_idx, after)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            _save_after_edit(data, base)
+            html = _render_segments(data, [left, right])
+        return html
+
+    @app.post("/api/transcribe/<transcribe_id>/segment/<int:seg_idx>/merge-prev")
+    @token_required
+    def api_segment_merge_prev(transcribe_id, seg_idx):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        with _txn_lock(base):
+            data = transcript_io.load(base + ".words.json")
+            try:
+                merged = transcript_io.merge_segment_with_prev(data, seg_idx)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            _save_after_edit(data, base)
+            html = _render_segments(data, [merged])
+        return html
+
+    @app.patch("/api/transcribe/<transcribe_id>/speaker-rename")
+    @token_required
+    def api_speaker_rename(transcribe_id):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        if "old" not in request.form or "new" not in request.form:
+            return jsonify({"error": "missing old or new"}), 400
+        old_raw = request.form.get("old", "")
+        old = old_raw.strip() or None
+        new = request.form.get("new", "")
+        with _txn_lock(base):
+            data = transcript_io.load(base + ".words.json")
+            changed = transcript_io.rename_speaker(data, old, new)
+            if changed:
+                _save_after_edit(data, base)
+            html = _render_segments(data, changed)
+        return jsonify({"updated": changed, "html": html})
+
+    @app.post("/api/transcribe/<transcribe_id>/highlight")
+    @token_required
+    def api_highlight_create(transcribe_id):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        try:
+            start = int(request.form.get("word_idx_start", ""))
+            end = int(request.form.get("word_idx_end", ""))
+        except (TypeError, ValueError):
+            return jsonify({"error": "missing word_idx_start / word_idx_end"}), 400
+        with _txn_lock(base):
+            data = transcript_io.load(base + ".words.json")
+            try:
+                h = transcript_io.add_highlight(data, start, end)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            _save_after_edit(data, base)
+        return jsonify(h)
+
+    @app.delete("/api/transcribe/<transcribe_id>/highlight/<h_id>")
+    @token_required
+    def api_highlight_delete(transcribe_id, h_id):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        with _txn_lock(base):
+            data = transcript_io.load(base + ".words.json")
+            if not transcript_io.delete_highlight(data, h_id):
+                return "", 404
+            _save_after_edit(data, base)
+        return "", 200
+
+    @app.post("/api/transcribe/<transcribe_id>/note")
+    @token_required
+    def api_note_create(transcribe_id):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        try:
+            word_idx = int(request.form.get("word_idx", ""))
+        except (TypeError, ValueError):
+            return jsonify({"error": "missing word_idx"}), 400
+        text = request.form.get("text", "")
+        with _txn_lock(base):
+            data = transcript_io.load(base + ".words.json")
+            try:
+                note = transcript_io.add_note(data, word_idx, text)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            _save_after_edit(data, base)
+        return jsonify(note)
+
+    @app.patch("/api/transcribe/<transcribe_id>/note/<n_id>")
+    @token_required
+    def api_note_update(transcribe_id, n_id):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        if "text" not in request.form:
+            return jsonify({"error": "missing text"}), 400
+        with _txn_lock(base):
+            data = transcript_io.load(base + ".words.json")
+            note = transcript_io.update_note(data, n_id, request.form["text"])
+            if note is None:
+                return "", 404
+            _save_after_edit(data, base)
+        return jsonify(note)
+
+    @app.delete("/api/transcribe/<transcribe_id>/note/<n_id>")
+    @token_required
+    def api_note_delete(transcribe_id, n_id):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        with _txn_lock(base):
+            data = transcript_io.load(base + ".words.json")
+            if not transcript_io.delete_note(data, n_id):
+                return "", 404
+            _save_after_edit(data, base)
+        return "", 200
+
+    @app.patch("/api/transcribe/<transcribe_id>/segment/<int:seg_idx>/reviewed")
+    @token_required
+    def api_segment_reviewed(transcribe_id, seg_idx):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        raw = request.form.get("reviewed", "")
+        reviewed = raw in ("1", "on", "true", "yes")
+        with _txn_lock(base):
+            data = transcript_io.load(base + ".words.json")
+            try:
+                changed = transcript_io.set_segment_reviewed(data, seg_idx, reviewed)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            if changed:
+                _save_after_edit(data, base)
+        return jsonify({"seg_idx": seg_idx, "reviewed": reviewed})
+
+    @app.post("/api/transcribe/<transcribe_id>/export-selection")
+    @token_required
+    def api_export_selection(transcribe_id):
+        tj, parent, base = _resolve_transcribe_paths(transcribe_id)
+        if tj is None:
+            return "", 404
+        try:
+            start = int(request.form.get("word_idx_start", ""))
+            end = int(request.form.get("word_idx_end", ""))
+        except (TypeError, ValueError):
+            return jsonify({"error": "missing word_idx_start / word_idx_end"}), 400
+        with _txn_lock(base):
+            data = transcript_io.load(base + ".words.json")
+            words = data.get("words") or []
+            if start < 0 or end >= len(words) or start > end:
+                return jsonify({"error": "invalid range"}), 400
+            # Walk segments; emit any segment that overlaps [start..end] as
+            # "[hh:mm:ss] <words>". Words outside the range are skipped.
+            chunks = []
+            for seg in data.get("segments") or []:
+                ids = [j for j in seg.get("word_idxs", [])
+                       if start <= j <= end and not words[j].get("deleted")]
+                if not ids:
+                    continue
+                ts = transcript_io._format_timestamp(float(seg.get("start", 0.0)), srt=False)
+                text = " ".join(words[j].get("w", "") for j in ids).strip()
+                if text:
+                    chunks.append(f"[{ts}] {text}")
+            body = "\n\n".join(chunks) + ("\n" if chunks else "")
+        download_name = sanitize_filename((parent.title or "selection") + " (selection)", ".txt")
+        from flask import Response
+        return Response(
+            body,
+            mimetype="text/plain; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+        )
+
     # --- helpers -----------------------------------------------------------
 
     def _enqueue_download(url: str, format_choice: str, format_id, title: str, thumbnail: str = "") -> str:
