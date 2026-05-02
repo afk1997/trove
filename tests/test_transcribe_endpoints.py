@@ -412,3 +412,122 @@ def test_transcribe_status_orphaned_returns_404(client, tmp_path):
     # Should have been dismissed
     with tjm._lock:
         assert "orphan1" not in tjm._jobs
+
+
+# ---------------------------------------------------------------------------
+# Auth-boundary regression tests: /transcript/<id> and /api/transcribe/<id>/
+# export.<fmt> were previously unauthenticated, leaking transcript content
+# (and signed media URLs) to anyone who could guess a transcribe_id.
+# ---------------------------------------------------------------------------
+
+def _seed_done_transcribe(app, tmp_path, parent_id="abc9", tj_id="tj9"):
+    """Set up a parent job + DONE transcribe job + minimal artifacts on disk."""
+    from jobs import Job, JobStatus
+    from transcribe_jobs import TranscribeJob, TranscribeStatus
+    media = tmp_path / "downloads" / f"{parent_id}.mp4"
+    media.parent.mkdir(parents=True, exist_ok=True)
+    media.write_bytes(b"M4A-FAKE")
+    base = str(media.with_suffix(""))
+    # Minimal v2 transcript artifact so _resolve_transcribe_paths returns it
+    # AND the transcript template renders (segments need start/end/word_idxs;
+    # words need idx/w/start/end/original_w/edited/deleted).
+    import json
+    (media.parent / f"{parent_id}.words.json").write_text(json.dumps({
+        "schema_version": 2,
+        "language": "en",
+        "duration": 1.0,
+        "title": None,
+        "highlights": [],
+        "notes": [],
+        "words": [{
+            "idx": 0, "w": "hi", "original_w": "hi",
+            "start": 0.0, "end": 0.5,
+            "edited": False, "deleted": False,
+        }],
+        "segments": [{
+            "start": 0.0, "end": 0.5,
+            "word_idxs": [0], "text": "hi",
+            "speaker": None, "reviewed": False,
+        }],
+    }))
+    (media.parent / f"{parent_id}.txt").write_text("hi\n")
+    (media.parent / f"{parent_id}.srt").write_text("1\n00:00:00,000 --> 00:00:00,500\nhi\n\n")
+    (media.parent / f"{parent_id}.vtt").write_text("WEBVTT\n\n00:00:00.000 --> 00:00:00.500\nhi\n\n")
+    jm = app.extensions["trove.jobs"]
+    tjm = app.extensions["trove.transcribe"]
+    with jm._lock:
+        jm._jobs[parent_id] = Job(
+            id=parent_id, url="https://x", title="x",
+            status=JobStatus.DONE,
+            file_path=str(media), filename=f"{parent_id}.mp4",
+        )
+    with tjm._lock:
+        tjm._jobs[tj_id] = TranscribeJob(
+            id=tj_id, parent_job_id=parent_id,
+            model_used="ggml-base.bin",
+            status=TranscribeStatus.DONE,
+        )
+    return base
+
+
+def test_transcript_view_requires_token_or_sig(tmp_path, monkeypatch):
+    """/transcript/<id> must reject anonymous access when TROVE_TOKEN is set."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TROVE_RATE_LIMIT", "0")
+    monkeypatch.setenv("TROVE_TOKEN", "secret")
+    import app as _app
+    import models_store
+    monkeypatch.setattr(_app, "DOWNLOAD_DIR", tmp_path / "downloads")
+    monkeypatch.setattr(models_store, "MODELS_DIR", tmp_path / "models")
+    app = create_app()
+    c = app.test_client()
+    _seed_done_transcribe(app, tmp_path, parent_id="abc9", tj_id="tj9")
+
+    # No bearer, no sig → 401
+    assert c.get("/transcript/tj9").status_code == 401
+    # Bearer → 200
+    assert c.get("/transcript/tj9",
+                 headers={"Authorization": "Bearer secret"}).status_code == 200
+    # Matching sig (transcribe_id is the resource) → 200
+    from safety import sign_resource
+    sig = sign_resource("tj9")
+    assert sig
+    assert c.get(f"/transcript/tj9?sig={sig}").status_code == 200
+    # Wrong sig → 401
+    assert c.get("/transcript/tj9?sig=deadbeef").status_code == 401
+
+
+def test_export_requires_token_or_sig(tmp_path, monkeypatch):
+    """/api/transcribe/<id>/export.<fmt> must reject anonymous access under TROVE_TOKEN."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TROVE_RATE_LIMIT", "0")
+    monkeypatch.setenv("TROVE_TOKEN", "secret")
+    import app as _app
+    import models_store
+    monkeypatch.setattr(_app, "DOWNLOAD_DIR", tmp_path / "downloads")
+    monkeypatch.setattr(models_store, "MODELS_DIR", tmp_path / "models")
+    app = create_app()
+    c = app.test_client()
+    _seed_done_transcribe(app, tmp_path, parent_id="abc8", tj_id="tj8")
+
+    # No auth → 401 for every format
+    for fmt in ("txt", "srt", "vtt"):
+        assert c.get(f"/api/transcribe/tj8/export.{fmt}").status_code == 401
+    # Bearer → 200
+    assert c.get("/api/transcribe/tj8/export.txt",
+                 headers={"Authorization": "Bearer secret"}).status_code == 200
+    # Matching sig → 200
+    from safety import sign_resource
+    sig = sign_resource("tj8")
+    assert c.get(f"/api/transcribe/tj8/export.srt?sig={sig}").status_code == 200
+    # Wrong sig → 401
+    assert c.get("/api/transcribe/tj8/export.vtt?sig=deadbeef").status_code == 401
+
+
+def test_csp_frame_ancestors_is_locked_down(client):
+    """Clickjacking guard: CSP must NOT allow framing from arbitrary origins."""
+    res = client.get("/")
+    csp = res.headers.get("Content-Security-Policy", "")
+    assert "frame-ancestors" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert "frame-ancestors *" not in csp

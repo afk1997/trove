@@ -130,7 +130,10 @@ def test_attach_security_headers_sets_basic_headers():
     assert r.headers["Referrer-Policy"] == "no-referrer"
     csp = r.headers["Content-Security-Policy"]
     assert "default-src 'self'" in csp
-    assert "frame-ancestors *" in csp
+    # Locked-down clickjacking guard: arbitrary origins must NOT be
+    # allowed to embed the app in an <iframe>.
+    assert "frame-ancestors 'none'" in csp
+    assert "frame-ancestors *" not in csp
     assert "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
 
 

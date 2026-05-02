@@ -49,6 +49,10 @@ def sanitize_filename(title: str, ext: str) -> str:
 def create_app() -> Flask:
     app = Flask(__name__)
     attach_security_headers(app)
+    # Expose sign_resource() to Jinja so templates can mint signed
+    # links for routes reached via direct browser navigation (anchor
+    # clicks, <video src>) where the Authorization header isn't sent.
+    app.jinja_env.globals["sign_resource"] = sign_resource
 
     rate_limiter = RateLimiter(rate=RATE_LIMIT_PER_MIN, per_seconds=60)
     job_manager = JobManager(
@@ -458,11 +462,15 @@ def create_app() -> Flask:
                 transcriber.write_artifacts(result, base_no_ext)
                 tj.duration_seconds = result.duration
                 tj.language_detected = result.language
-                # 4. Clean up the .wav
-                try: os.remove(wav_path)
-                except OSError: pass
             finally:
-                pass  # final state set by TranscribeJobManager._run
+                # Always remove the temp WAV — even on cancel/error/exception.
+                # The success path used to clean it up, but cancel/error early-
+                # returned and leaked a multi-MB file per aborted transcribe.
+                try:
+                    if os.path.exists(wav_path):
+                        os.remove(wav_path)
+                except OSError:
+                    pass
 
         tjid = transcribe_manager.submit(
             parent_job_id=parent_job_id,
@@ -517,6 +525,7 @@ def create_app() -> Flask:
         return "", 200
 
     @app.get("/api/transcribe/<transcribe_id>/export.<fmt>")
+    @token_or_sig_required
     def api_transcribe_export(transcribe_id, fmt):
         if fmt not in {"txt", "srt", "vtt"}:
             return abort(404)
@@ -572,6 +581,7 @@ def create_app() -> Flask:
             return lock
 
     @app.get("/transcript/<transcribe_id>")
+    @token_or_sig_required
     def transcript_view(transcribe_id):
         tj, parent, base = _resolve_transcribe_paths(transcribe_id)
         if tj is None:

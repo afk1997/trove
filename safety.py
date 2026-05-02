@@ -187,7 +187,7 @@ def attach_security_headers(app):
             f"font-src 'self' https://fonts.gstatic.com; "
             f"script-src 'self' 'nonce-{nonce}'; "
             "connect-src 'self'; "
-            "frame-ancestors *"
+            "frame-ancestors 'none'"
         )
         return response
 

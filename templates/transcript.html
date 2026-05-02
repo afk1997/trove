@@ -52,9 +52,14 @@
       <details class="t-tb-export">
         <summary class="t-tb-btn">⬇ export ▾</summary>
         <div class="t-tb-export-menu">
-          <a href="/api/transcribe/{{ tj.id }}/export.txt">.txt</a>
-          <a href="/api/transcribe/{{ tj.id }}/export.srt">.srt</a>
-          <a href="/api/transcribe/{{ tj.id }}/export.vtt">.vtt</a>
+          {# Sign the export URLs so direct <a> downloads work even when
+             TROVE_TOKEN is set — browsers can't attach Authorization
+             headers to anchor clicks. Mirrors the media-URL pattern. #}
+          {% set _es = sign_resource(tj.id) %}
+          {% set _q = ('?sig=' ~ _es) if _es else '' %}
+          <a href="/api/transcribe/{{ tj.id }}/export.txt{{ _q }}">.txt</a>
+          <a href="/api/transcribe/{{ tj.id }}/export.srt{{ _q }}">.srt</a>
+          <a href="/api/transcribe/{{ tj.id }}/export.vtt{{ _q }}">.vtt</a>
         </div>
       </details>
       <button type="button" class="t-tb-btn" id="t-help-btn" title="how to use (?)">?</button>
