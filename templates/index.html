@@ -151,6 +151,15 @@
       });
       return n;
     }
+    // Auto-grow the textarea so multi-URL pastes don't get hidden behind
+    // a single-line scrollbar. Capped via CSS max-height.
+    function autoSize() {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 180) + 'px';
+    }
+    input.addEventListener('input', autoSize);
+    input.addEventListener('focus', autoSize);
+    setTimeout(autoSize, 0);
     function splitUrls() {
       var raw = input.value || '';
       var seen = {};
