@@ -111,6 +111,15 @@ docker run -v ./models:/app/models -v ./downloads:/app/downloads -p 8899:8899 tr
 
 **network policy:** the only outbound calls trove makes are (1) yt-dlp fetching the original media, and (2) the model download from huggingface during the setup wizard. transcription itself is 100% local.
 
+**speaker diarization (optional, off by default):** trove can auto-label speakers (`Speaker 1`, `Speaker 2`, …) using a fully-local pipeline — no HuggingFace login, no API keys. The pipeline is silero-vad → resemblyzer voice embeddings → sklearn agglomerative clustering. Realistic accuracy is ~70% on clean two-person audio; you can rename any label inline and the rename propagates to every occurrence.
+
+To enable:
+```bash
+pip install resemblyzer silero-vad scikit-learn   # ~800MB (PyTorch is the bulk)
+export TROVE_DIARIZATION=on
+```
+Without these deps installed, or with `TROVE_DIARIZATION=off` (the default), transcription behaves exactly as before — segments are split on speech pauses and speakers stay unlabeled.
+
 ## stack
 
 - **backend:** Python 3.12 + Flask

@@ -442,6 +442,18 @@ def create_app() -> Flask:
                     tj.error_message = result.error
                     return
 
+                # 2.5 Diarize (best-effort; failure NEVER kills the transcribe).
+                # Only runs when TROVE_DIARIZATION=on AND the optional deps are
+                # installed. Default behavior is unchanged from pre-v3.1.
+                try:
+                    import diarizer
+                    if diarizer.available():
+                        chunks = diarizer.diarize(audio_path=wav_path)
+                        if chunks:
+                            transcriber.apply_speakers(result, chunks)
+                except Exception as e:
+                    app.logger.warning("diarization skipped: %s", e)
+
                 # 3. Write artifacts
                 transcriber.write_artifacts(result, base_no_ext)
                 tj.duration_seconds = result.duration

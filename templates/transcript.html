@@ -45,6 +45,10 @@
       <label class="t-tb-toggle" id="t-tb-follow-wrap"><input type="checkbox" id="t-tb-follow" checked>follow</label>
     </div>
     <div class="t-tb-group t-tb-right">
+      {% if not is_audio %}
+        <button type="button" class="t-tb-btn t-video-show-btn" id="t-video-show-btn"
+                title="show video" hidden>▸ show video</button>
+      {% endif %}
       <details class="t-tb-export">
         <summary class="t-tb-btn">⬇ export ▾</summary>
         <div class="t-tb-export-menu">
@@ -53,7 +57,7 @@
           <a href="/api/transcribe/{{ tj.id }}/export.vtt">.vtt</a>
         </div>
       </details>
-      <button type="button" class="t-tb-btn" id="t-help-btn" title="shortcuts (?)">?</button>
+      <button type="button" class="t-tb-btn" id="t-help-btn" title="how to use (?)">?</button>
     </div>
     <div class="t-tb-search-bar" id="t-tb-search-bar" hidden>
       <input id="t-search" type="search" placeholder="⚲ search transcript…" autocomplete="off">
@@ -85,19 +89,29 @@
     </div>
     {% if is_audio %}
       <audio id="t-player" preload="metadata" src="{{ media_url }}"></audio>
-    {% else %}
-      <button type="button" class="t-pb-video-toggle" id="t-pb-video-toggle"
-              aria-label="show / hide video" aria-pressed="false" title="show / hide video">▢</button>
-      <div class="t-video-panel" id="t-video-panel" hidden>
-        <video id="t-player" preload="metadata" src="{{ media_url }}" playsinline></video>
-      </div>
     {% endif %}
   </div>
 
   {# === ZONE D: document body === #}
-  <section class="transcript-body" id="t-body">
-    {% for seg in data.segments %}{% set seg_idx = loop.index0 %}{% include "partials/transcript_segment.html" %}{% endfor %}
-  </section>
+  <div class="t-doc-page" id="t-doc-page">
+    {% if not is_audio %}
+      <aside id="t-video-rail" class="t-video-rail" data-state="floating"
+             aria-label="video player">
+        <div class="t-video-rail-grab" aria-hidden="true" title="drag">⠿</div>
+        <video id="t-player" controls preload="metadata"
+               src="{{ media_url }}" playsinline></video>
+        <div class="t-video-rail-actions">
+          <button type="button" class="t-video-rail-expand"
+                  aria-label="expand video to side rail" title="expand">⛶</button>
+          <button type="button" class="t-video-rail-close"
+                  aria-label="hide video" title="hide">✕</button>
+        </div>
+      </aside>
+    {% endif %}
+    <section class="transcript-body" id="t-body">
+      {% for seg in data.segments %}{% set seg_idx = loop.index0 %}{% include "partials/transcript_segment.html" %}{% endfor %}
+    </section>
+  </div>
 
   <button type="button" class="t-jump-current" id="t-jump-current" hidden>↓ jump to current</button>
 
@@ -119,25 +133,90 @@
     <div class="modal t-shortcut-help" role="document">
       <div class="modal-head">
         <span class="modal-stamp">HELP</span>
-        <h2>keyboard shortcuts</h2>
+        <h2>how to use</h2>
       </div>
-      <div class="modal-body">
-        <ul class="t-shortcuts">
-          <li><code>Space</code> / <code>K</code> <span>play / pause</span></li>
-          <li><code>J</code> / <code>L</code> <span>back / forward 5s</span></li>
-          <li><code>,</code> / <code>.</code> <span>speed −/+ 0.25</span></li>
-          <li><code>⌘F</code> <span>focus search</span></li>
-          <li><code>⌘⇧F</code> <span>find &amp; replace</span></li>
-          <li><code>⌘B</code> <span>bookmark current time</span></li>
-          <li><code>⌘Z</code> / <code>⌘⇧Z</code> <span>undo / redo</span></li>
-          <li><code>Enter</code> <span>split paragraph at cursor</span></li>
-          <li><code>Backspace</code> <span>(at start) merge with previous</span></li>
-          <li><code>?</code> <span>open this dialog</span></li>
-          <li><code>Esc</code> <span>close / cancel</span></li>
-        </ul>
+      <div class="modal-body t-help-body">
+        <section class="help-section">
+          <h3 class="help-section-h">▸ Editing</h3>
+          <p>Click anywhere in the document to place your cursor. Type to fix
+             a transcript. Edits autosave.</p>
+          <dl>
+            <dt><code>⌘Z</code> / <code>⌘⇧Z</code></dt><dd>undo / redo</dd>
+            <dt><code>Enter</code></dt><dd>split paragraph at cursor</dd>
+            <dt><code>Backspace</code></dt><dd>(at start) merge with previous paragraph</dd>
+            <dt><code>Esc</code></dt><dd>close menus / clear selection</dd>
+          </dl>
+        </section>
+        <section class="help-section">
+          <h3 class="help-section-h">▸ Playback</h3>
+          <dl>
+            <dt><code>Space</code></dt><dd>play / pause</dd>
+            <dt><code>J</code> / <code>L</code></dt><dd>seek −5s / +5s</dd>
+            <dt><code>,</code> / <code>.</code></dt><dd>speed −0.25× / +0.25×</dd>
+            <dt>Click a word</dt><dd>place text cursor (no seek)</dd>
+            <dt>Double-click a word</dt><dd>seek to that word</dd>
+            <dt><code>Alt</code> + click</dt><dd>seek without entering text-edit</dd>
+            <dt>Click <code>[00:14]</code></dt><dd>seek to segment start</dd>
+          </dl>
+        </section>
+        <section class="help-section">
+          <h3 class="help-section-h">▸ Find &amp; replace</h3>
+          <dl>
+            <dt><code>⌘F</code></dt><dd>search transcript</dd>
+            <dt><code>⌘⇧F</code></dt><dd>find &amp; replace (bulk)</dd>
+            <dt><code>Enter</code> / <code>⇧Enter</code></dt><dd>next / previous match</dd>
+          </dl>
+        </section>
+        <section class="help-section">
+          <h3 class="help-section-h">▸ Speakers</h3>
+          <p>Speakers are detected automatically (best-effort) and labeled
+             <em>Speaker 1, Speaker 2, …</em>. Click any label to rename —
+             the new name propagates to every occurrence of that speaker.</p>
+        </section>
+        <section class="help-section">
+          <h3 class="help-section-h">▸ Selection actions</h3>
+          <p>Select any text to reveal a small toolbar:
+             <em>copy · highlight · bookmark · add note</em>. Right-click a
+             selection to also see <em>export selection</em> and
+             <em>revert paragraph</em>.</p>
+        </section>
+        <section class="help-section">
+          <h3 class="help-section-h">▸ Bookmarks &amp; notes</h3>
+          <dl>
+            <dt><code>⌘B</code></dt><dd>bookmark current playback time</dd>
+          </dl>
+          <p>Notes anchor to a word; click the marker to edit or delete.</p>
+        </section>
+        <section class="help-section">
+          <h3 class="help-section-h">▸ Reviewed</h3>
+          <p>Tick the checkbox in the gutter to mark a paragraph reviewed.
+             Reviewed paragraphs get a faint green left edge.</p>
+        </section>
+        <section class="help-section">
+          <h3 class="help-section-h">▸ Video controls</h3>
+          <p><strong>Floating window:</strong> drag to reposition;
+             <code>✕</code> to hide; <code>⛶</code> to expand to a fixed
+             left rail (the document reflows beside it).
+             <strong>Show video:</strong> use the
+             <em>▸ show video</em> button in the toolbar when hidden.</p>
+        </section>
+        <section class="help-section">
+          <h3 class="help-section-h">▸ Export</h3>
+          <p>Use the <em>⬇ export</em> menu for <code>.txt</code>,
+             <code>.srt</code>, or <code>.vtt</code>. Includes any edits.</p>
+        </section>
+        <section class="help-section">
+          <h3 class="help-section-h">▸ Tips</h3>
+          <ul class="t-help-tips">
+            <li>Toggle <em>follow</em> to auto-scroll with playback.</li>
+            <li>The little <em>↓ jump to current</em> button appears
+                when you scroll away from the active paragraph.</li>
+            <li>Press <code>?</code> any time to reopen this panel.</li>
+          </ul>
+        </section>
       </div>
       <div class="modal-actions">
-        <button type="button" id="t-help-close" class="modal-primary">got it</button>
+        <button type="button" id="t-help-close" class="modal-primary">done — got it</button>
       </div>
     </div>
   </div>
@@ -540,17 +619,114 @@
     seekToWord(w);
   });
 
-  // ===== VIDEO EXPAND TOGGLE (video transcripts only) =====================
-  const vidToggle = document.getElementById('t-pb-video-toggle');
-  const vidPanel = document.getElementById('t-video-panel');
-  if (vidToggle && vidPanel) {
-    vidToggle.addEventListener('click', function () {
-      const willShow = vidPanel.hidden;
-      vidPanel.hidden = !willShow;
-      vidToggle.setAttribute('aria-pressed', willShow ? 'true' : 'false');
-      vidToggle.classList.toggle('is-active', willShow);
+  // ===== VIDEO RAIL (floating / hidden / expanded) ========================
+  // Only present for video transcripts. Audio transcripts skip this entirely
+  // (no rail element rendered → all selectors below no-op).
+  (function initVideoRail() {
+    const rail = document.getElementById('t-video-rail');
+    const docPage = document.getElementById('t-doc-page');
+    const showBtn = document.getElementById('t-video-show-btn');
+    if (!rail || !docPage) return;
+
+    const KEY = 'trove.video.' + TID;
+    let state;
+    try {
+      state = JSON.parse(localStorage.getItem(KEY) || 'null');
+    } catch (_) { state = null; }
+    if (!state || typeof state !== 'object') {
+      state = { state: 'floating', pos: { x: 24, y: 24 } };
+    }
+
+    function clampPos(pos) {
+      const w = rail.offsetWidth || 280, h = rail.offsetHeight || 160;
+      const maxX = Math.max(8, window.innerWidth - w - 8);
+      const maxY = Math.max(8, window.innerHeight - h - 8);
+      return {
+        x: Math.min(Math.max(8, pos.x | 0), maxX),
+        y: Math.min(Math.max(8, pos.y | 0), maxY),
+      };
+    }
+    function persist() {
+      try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (_) {}
+    }
+    function apply() {
+      rail.dataset.state = state.state;
+      if (state.state === 'floating') {
+        const p = clampPos(state.pos || { x: 24, y: 24 });
+        rail.style.left = p.x + 'px';
+        rail.style.bottom = p.y + 'px';
+        rail.style.right = '';
+        rail.style.top = '';
+      } else {
+        rail.style.left = rail.style.bottom = rail.style.right = rail.style.top = '';
+      }
+      docPage.classList.toggle('has-expanded-video', state.state === 'expanded');
+      if (showBtn) showBtn.hidden = state.state !== 'hidden';
+      persist();
+    }
+
+    const closeBtn = rail.querySelector('.t-video-rail-close');
+    const expandBtn = rail.querySelector('.t-video-rail-expand');
+    if (closeBtn) closeBtn.addEventListener('click', function () {
+      state.state = 'hidden'; apply();
     });
-  }
+    if (expandBtn) expandBtn.addEventListener('click', function () {
+      state.state = state.state === 'expanded' ? 'floating' : 'expanded';
+      apply();
+    });
+    if (showBtn) showBtn.addEventListener('click', function () {
+      state.state = 'floating'; apply();
+    });
+
+    // Drag (floating only). Uses pointer events so it works with mouse + touch.
+    const grab = rail.querySelector('.t-video-rail-grab');
+    if (grab) {
+      let dragging = false;
+      let originX = 0, originY = 0;     // pointer position at drag start
+      let startLeft = 0, startBottom = 0;
+      grab.addEventListener('pointerdown', function (e) {
+        if (state.state !== 'floating') return;
+        dragging = true;
+        originX = e.clientX; originY = e.clientY;
+        startLeft = parseInt(rail.style.left || (state.pos && state.pos.x) || 24, 10);
+        startBottom = parseInt(rail.style.bottom || (state.pos && state.pos.y) || 24, 10);
+        rail.classList.add('is-dragging');
+        try { grab.setPointerCapture(e.pointerId); } catch (_) {}
+        e.preventDefault();
+      });
+      grab.addEventListener('pointermove', function (e) {
+        if (!dragging) return;
+        const dx = e.clientX - originX;
+        const dy = e.clientY - originY;
+        // bottom is anchored to viewport bottom, so dragging DOWN means SUBTRACT
+        const next = clampPos({ x: startLeft + dx, y: startBottom - dy });
+        rail.style.left = next.x + 'px';
+        rail.style.bottom = next.y + 'px';
+        state.pos = next;
+      });
+      function endDrag(e) {
+        if (!dragging) return;
+        dragging = false;
+        rail.classList.remove('is-dragging');
+        try { grab.releasePointerCapture(e.pointerId); } catch (_) {}
+        persist();
+      }
+      grab.addEventListener('pointerup', endDrag);
+      grab.addEventListener('pointercancel', endDrag);
+    }
+
+    apply();
+  })();
+
+  // ===== FIRST-VISIT HELP TOAST ===========================================
+  try {
+    if (!localStorage.getItem('trove.transcript.seen-help')) {
+      setTimeout(function () {
+        toast('press ? for help · click any word to edit · double-click to seek');
+      }, 600);
+      localStorage.setItem('trove.transcript.seen-help', '1');
+    }
+  } catch (_) {}
 
   // ===== ACTIVE WORD / SEGMENT TRACKING + FOLLOW-ALONG ====================
   let activeIdx = -1;

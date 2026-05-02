@@ -147,13 +147,56 @@ def run_transcribe(*, audio_path: str, model_path: str,
     )
 
 
-def _build_segment(words: list[dict]) -> dict:
+def _build_segment(words: list[dict], speaker: str | None = None) -> dict:
     return {
         "start": words[0]["start"],
         "end": words[-1]["end"],
         "text": " ".join(w["w"] for w in words),
         "words": words,
+        "speaker": speaker,
     }
+
+
+def apply_speakers(result: "TranscriptResult", chunks: list) -> None:
+    """Assign a speaker to each word and regroup ``result.segments``.
+
+    Each word in ``result.words`` is tagged with the speaker of the
+    diarization chunk whose [start, end) interval contains the word's
+    start time. Then segments are rebuilt so that a paragraph break is
+    produced on EITHER a speaker change OR the existing pause-gap rule.
+
+    ``chunks`` items must have ``.start``, ``.end``, ``.speaker`` attrs
+    (e.g. ``diarizer.SpeakerChunk``). No-op when chunks is empty.
+    """
+    if not result.words or not chunks:
+        return
+    sorted_chunks = sorted(chunks, key=lambda c: c.start)
+    for w in result.words:
+        ws = float(w["start"])
+        spk = None
+        for c in sorted_chunks:
+            if c.start <= ws < c.end:
+                spk = c.speaker
+                break
+            if c.start > ws:
+                break
+        w["speaker"] = spk
+
+    new_segs: list[dict] = []
+    current = [result.words[0]]
+    cur_spk = result.words[0].get("speaker")
+    for w in result.words[1:]:
+        gap = float(w["start"]) - float(current[-1]["end"])
+        wspk = w.get("speaker")
+        if wspk != cur_spk or gap > _PARAGRAPH_GAP_SECONDS:
+            new_segs.append(_build_segment(current, cur_spk))
+            current = [w]
+            cur_spk = wspk
+        else:
+            current.append(w)
+    if current:
+        new_segs.append(_build_segment(current, cur_spk))
+    result.segments = new_segs
 
 
 def write_artifacts(result: TranscriptResult, base_path: str) -> None:
@@ -192,7 +235,7 @@ def write_artifacts(result: TranscriptResult, base_path: str) -> None:
             "end": seg["end"],
             "text": seg.get("text", ""),
             "word_idxs": list(range(cursor, cursor + n)),
-            "speaker": None,
+            "speaker": seg.get("speaker"),
         })
         cursor += n
 

@@ -5,3 +5,13 @@ yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz
 pytest>=8.0
 pywhispercpp>=1.2.0
 psutil>=5.9
+
+# --- OPTIONAL (diarization) ---------------------------------------------
+# Set TROVE_DIARIZATION=on after installing these to enable speaker
+# detection on transcribe. ~800MB total — these are intentionally NOT
+# installed by default. Install with:
+#   pip install resemblyzer silero-vad scikit-learn
+# (PyTorch is pulled in transitively by resemblyzer, ~700MB CPU-only wheel.)
+# resemblyzer>=0.1.4
+# silero-vad>=5.0
+# scikit-learn>=1.3
