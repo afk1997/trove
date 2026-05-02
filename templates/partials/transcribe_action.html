@@ -1,7 +1,10 @@
 {% set state = tj.status.value if tj else "idle" %}
 <span class="clip-transcribe-row" data-transcribe-state="{{ state }}">
   {% if state == "running" or state == "queued" %}
-    <span hx-get="/api/transcribe/{{ tj.id }}/status" hx-trigger="every 2s" hx-swap="outerHTML">
+    <span hx-get="/api/transcribe/{{ tj.id }}/status"
+          hx-trigger="every 2s"
+          hx-target="closest .clip-transcribe-row"
+          hx-swap="outerHTML">
       ▸ transcribing… {{ tj.progress_pct }}%
       <button type="button"
               class="clip-transcribe-cancel"
