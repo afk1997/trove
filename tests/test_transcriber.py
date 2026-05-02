@@ -48,21 +48,20 @@ def test_extract_audio_raises_on_ffmpeg_failure(monkeypatch, tmp_path):
 
 
 def test_run_transcribe_returns_structured_result(monkeypatch, tmp_path):
-    """run_transcribe wraps pywhispercpp Model and returns a TranscriptResult."""
+    """run_transcribe wraps pywhispercpp Model and returns a TranscriptResult.
+
+    pywhispercpp emits one Segment per word when configured with
+    token_timestamps=True + max_len=1 + split_on_word=True. Each Segment has
+    integer t0/t1 in centiseconds (1/100 sec).
+    """
     fake_segments = [
-        type("S", (), {
-            "text": "hello world",
-            "t0": 0.0, "t1": 1.0,
-            "words": [
-                type("W", (), {"text": "hello", "t0": 0.0, "t1": 0.5})(),
-                type("W", (), {"text": "world", "t0": 0.5, "t1": 1.0})(),
-            ],
-        })()
+        type("S", (), {"text": "hello", "t0": 0,  "t1": 50})(),
+        type("S", (), {"text": "world", "t0": 50, "t1": 100})(),
     ]
 
     class FakeModel:
         def __init__(self, model_path, **kw):
-            self.params = type("P", (), {})()
+            pass
         def transcribe(self, audio, **kw):
             return fake_segments
         def detected_language(self):
@@ -87,9 +86,41 @@ def test_run_transcribe_returns_structured_result(monkeypatch, tmp_path):
     assert len(res.words) == 2
     assert res.words[0]["w"] == "hello"
     assert res.words[0]["start"] == 0.0
+    assert res.words[0]["end"] == 0.5
+    assert res.words[1]["w"] == "world"
+    # Words within the gap threshold group into one paragraph
+    assert len(res.segments) == 1
     assert res.segments[0]["text"] == "hello world"
-    # Progress should have been called at least once with 100%
     assert any(p == 100 for p in progress_events)
+
+
+def test_run_transcribe_groups_words_into_paragraphs(monkeypatch, tmp_path):
+    """Words separated by a >1s gap form separate paragraphs."""
+    fake_segments = [
+        type("S", (), {"text": "first",  "t0": 0,    "t1": 50})(),
+        type("S", (), {"text": "para",   "t0": 50,   "t1": 100})(),
+        # 2-second gap (200 centiseconds)
+        type("S", (), {"text": "second", "t0": 300,  "t1": 400})(),
+        type("S", (), {"text": "para",   "t0": 400,  "t1": 500})(),
+    ]
+
+    class FakeModel:
+        def __init__(self, *a, **kw): pass
+        def transcribe(self, *a, **kw): return fake_segments
+        def detected_language(self): return ""
+
+    monkeypatch.setattr(transcriber, "_load_pywhispercpp_model", lambda p: FakeModel())
+
+    audio = tmp_path / "x.wav"
+    audio.write_bytes(b"WAV")
+    res = transcriber.run_transcribe(
+        audio_path=str(audio),
+        model_path=str(tmp_path / "m.bin"),
+    )
+    assert res.error is None
+    assert len(res.segments) == 2
+    assert res.segments[0]["text"] == "first para"
+    assert res.segments[1]["text"] == "second para"
 
 
 def test_run_transcribe_cancellable(monkeypatch, tmp_path):

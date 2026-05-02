@@ -45,6 +45,10 @@ def _load_pywhispercpp_model(model_path: str):
     return Model(model_path, n_threads=os.cpu_count() or 4, print_progress=False)
 
 
+# Gap (in seconds) between consecutive words that triggers a new paragraph.
+_PARAGRAPH_GAP_SECONDS = 1.0
+
+
 def run_transcribe(*, audio_path: str, model_path: str,
                    progress_cb=None, cancel_check=None) -> TranscriptResult:
     """Run whisper.cpp on audio_path with model at model_path.
@@ -54,6 +58,11 @@ def run_transcribe(*, audio_path: str, model_path: str,
 
     Returns a TranscriptResult. On cancel, .error == "cancelled" with empty
     segments/words.
+
+    Word-level timestamps come from setting `token_timestamps=True` plus
+    `max_len=1` and `split_on_word=True`, which makes pywhispercpp emit
+    one Segment per word. We then group consecutive words into pseudo-
+    paragraphs by speech-pause gap.
     """
     if cancel_check and cancel_check():
         return TranscriptResult(language="", duration=0.0, segments=[], words=[], error="cancelled")
@@ -74,8 +83,13 @@ def run_transcribe(*, audio_path: str, model_path: str,
         progress_cb(10)
 
     try:
-        # word_timestamps=True asks whisper.cpp for word-level timing
-        raw_segments = model.transcribe(audio_path, word_timestamps=True)
+        # token_timestamps + max_len=1 + split_on_word=True → one Segment per word
+        raw_segments = model.transcribe(
+            audio_path,
+            token_timestamps=True,
+            max_len=1,
+            split_on_word=True,
+        )
     except Exception as e:
         return TranscriptResult(language="", duration=0.0, segments=[], words=[],
                                 error=f"transcribe_error: {e}")
@@ -83,31 +97,41 @@ def run_transcribe(*, audio_path: str, model_path: str,
     if cancel_check and cancel_check():
         return TranscriptResult(language="", duration=0.0, segments=[], words=[], error="cancelled")
 
-    segments = []
+    # Each Segment is a word: {.t0 (centiseconds), .t1, .text}.
+    # Convert to seconds and build word array, then group into paragraphs.
     words = []
     duration = 0.0
     for seg in raw_segments:
-        seg_start = float(getattr(seg, "t0", 0.0))
-        seg_end = float(getattr(seg, "t1", 0.0))
-        duration = max(duration, seg_end)
-        seg_words = []
-        for w in (getattr(seg, "words", None) or []):
-            wd = {
-                "w": getattr(w, "text", "").strip(),
-                "start": float(getattr(w, "t0", 0.0)),
-                "end": float(getattr(w, "t1", 0.0)),
-            }
-            seg_words.append(wd)
-            words.append(wd)
-        segments.append({
-            "start": seg_start,
-            "end": seg_end,
-            "text": getattr(seg, "text", "").strip(),
-            "words": seg_words,
-        })
+        # whisper.cpp uses centiseconds (1/100 sec); pywhispercpp passes through
+        t0 = float(getattr(seg, "t0", 0)) / 100.0
+        t1 = float(getattr(seg, "t1", 0)) / 100.0
+        text = (getattr(seg, "text", "") or "").strip()
+        if not text:
+            continue
+        words.append({"w": text, "start": t0, "end": t1})
+        duration = max(duration, t1)
+
+    # Group consecutive words into paragraph-like segments
+    segments = []
+    if words:
+        current_words = [words[0]]
+        for w in words[1:]:
+            gap = w["start"] - current_words[-1]["end"]
+            if gap > _PARAGRAPH_GAP_SECONDS:
+                # Flush current paragraph
+                segments.append(_build_segment(current_words))
+                current_words = [w]
+            else:
+                current_words.append(w)
+        if current_words:
+            segments.append(_build_segment(current_words))
 
     try:
-        language = model.detected_language() or ""
+        language = ""
+        # detected_language is a method on Model in some versions, attribute in others
+        if hasattr(model, "detected_language"):
+            dl = model.detected_language
+            language = (dl() if callable(dl) else dl) or ""
     except Exception:
         language = ""
 
@@ -121,6 +145,15 @@ def run_transcribe(*, audio_path: str, model_path: str,
         words=words,
         error=None,
     )
+
+
+def _build_segment(words: list[dict]) -> dict:
+    return {
+        "start": words[0]["start"],
+        "end": words[-1]["end"],
+        "text": " ".join(w["w"] for w in words),
+        "words": words,
+    }
 
 
 def write_artifacts(result: TranscriptResult, base_path: str) -> None:

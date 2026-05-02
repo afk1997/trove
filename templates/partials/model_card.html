@@ -10,7 +10,12 @@
   <p class="model-card-meta">
     {{ "%.0f" | format(m.size_bytes / 1048576) }} MB
     <span class="sep">·</span>
-    ~{{ "%.1f" | format(m.rtf) }}× realtime
+    {% set sec_per_min = (60 / m.rtf) %}
+    {% if sec_per_min < 60 %}
+      ~{{ "%.0f" | format(sec_per_min) }} sec per min of audio
+    {% else %}
+      ~{{ "%.1f" | format(sec_per_min / 60) }} min per min of audio
+    {% endif %}
     <span class="sep">·</span>
     <span class="model-card-stars" aria-label="{{ m.stars }} of 5 stars">{{ "★" * m.stars }}{{ "☆" * (5 - m.stars) }}</span>
     {% if m.multilingual %}<span class="sep">·</span> multilingual{% endif %}
