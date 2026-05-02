@@ -34,18 +34,18 @@
       <span>1000+ sources</span>
     </div>
     <div class="hero-input-row">
-      <label class="sr-only" for="urls">Paste a link</label>
-      <input
+      <label class="sr-only" for="urls">Paste a link or many</label>
+      <textarea
         id="urls"
         name="url"
-        type="url"
+        rows="1"
         placeholder="https://www.youtube.com/watch?v=…"
         autocomplete="off"
         autocapitalize="off"
         spellcheck="false"
         required
         class="hero-input"
-      >
+      ></textarea>
     </div>
     <input type="hidden" name="format" id="format-input" value="video">
     <div class="hero-controls">
@@ -53,6 +53,10 @@
         <button type="button" class="hero-pill is-active" data-format="video">MP4</button>
         <button type="button" class="hero-pill" data-format="audio">MP3</button>
       </div>
+      <label class="hero-autotx" for="auto-transcribe">
+        <input type="checkbox" id="auto-transcribe" name="auto_transcribe">
+        transcribe after download
+      </label>
       <button type="submit" class="hero-cta" id="fetch-btn">Save ↗</button>
     </div>
   </form>
@@ -114,6 +118,48 @@
     });
   });
 
+  // Persist auto-transcribe checkbox across page loads via localStorage.
+  (function () {
+    var box = document.getElementById('auto-transcribe');
+    if (!box) return;
+    try {
+      box.checked = localStorage.getItem('trove.auto_transcribe') === '1';
+    } catch (_) { /* private mode, etc. */ }
+    box.addEventListener('change', function () {
+      try {
+        localStorage.setItem('trove.auto_transcribe', box.checked ? '1' : '0');
+      } catch (_) { /* ignore */ }
+    });
+  })();
+
+  // Route the form post: 1 URL -> /api/info-card (existing ready-card flow),
+  // 2+ URLs -> /api/batch-download (skip the picker, queue them all).
+  // Splitting matches util.split_urls on the server (commas + whitespace).
+  (function () {
+    var form = document.getElementById('fetch-form');
+    var input = document.getElementById('urls');
+    if (!form || !input) return;
+    function countUrls() {
+      var raw = input.value || '';
+      var seen = {};
+      var n = 0;
+      raw.split(/[\s,]+/).forEach(function (t) {
+        var s = t.trim();
+        if (!s || seen[s]) return;
+        seen[s] = 1;
+        n++;
+      });
+      return n;
+    }
+    form.addEventListener('htmx:configRequest', function (evt) {
+      if (countUrls() > 1) {
+        evt.detail.path = '/api/batch-download';
+        // The batch endpoint reads `urls` (and falls back to `url`); both
+        // map to the same textarea name="url" so no renaming needed.
+      }
+    });
+  })();
+
   // Fetch button label state, reset form, persist format selection across resets,
   // hide empty-state hint as soon as first card lands
   (function () {
@@ -133,11 +179,14 @@
       btn.textContent = 'Save ↗';
       pills.forEach(function (p) { p.disabled = false; });
       var keepFormat = document.getElementById('format-input').value;
+      var keepAuto = document.getElementById('auto-transcribe');
+      var keepAutoVal = keepAuto ? keepAuto.checked : false;
       form.reset();
       document.getElementById('format-input').value = keepFormat;
       pills.forEach(function (c) {
         c.classList.toggle('is-active', c.dataset.format === keepFormat);
       });
+      if (keepAuto) keepAuto.checked = keepAutoVal;
       // Hide empty-state hint once a card has landed
       if (hint && document.querySelectorAll('#queue .clip').length > 0) {
         hint.style.display = 'none';

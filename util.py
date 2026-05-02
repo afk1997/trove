@@ -9,6 +9,30 @@ import re
 import unicodedata
 
 
+_URL_SPLIT_RE = re.compile(r"[\s,]+")
+
+
+def split_urls(raw: str) -> list[str]:
+    """Split a paste-blob into individual URL candidates.
+
+    Splits on commas and any whitespace (including newlines/tabs). Trims
+    each candidate, drops empties, deduplicates while preserving the
+    first-seen order. The caller is responsible for `is_safe_url` /
+    yt-dlp validation — this only normalizes the input shape.
+    """
+    if not raw:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for token in _URL_SPLIT_RE.split(raw):
+        t = token.strip()
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+    return out
+
+
 def sanitize_filename(title: str, ext: str) -> str:
     """Produce a safe download_name. Falls back to a placeholder when empty.
 

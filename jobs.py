@@ -48,6 +48,18 @@ class Job:
     # Transient flag set by JobManager.pause() before the process is killed,
     # so runner._cleanup_glob() can be skipped (preserves .part files).
     _was_paused: bool = False
+    # When True, the download worker auto-enqueues a transcribe on success
+    # using the active model + env-default diarization. Set at submit time
+    # by the batch endpoint or the single-URL ready-card form when the
+    # "transcribe after download" checkbox is checked. Persisted so the
+    # behavior survives a server restart and a paused→resumed download.
+    auto_transcribe: bool = False
+    # Transient hint surfaced on the DONE card when auto-transcribe was
+    # requested but couldn't fire (e.g. no active model). Not persisted;
+    # the hint disappears after a server restart, which is acceptable —
+    # the user can still click `▸ transcribe` manually after installing
+    # a model.
+    _auto_transcribe_hint: str | None = None
 
 
 class JobManager:
@@ -95,9 +107,19 @@ class JobManager:
             # Persistence failure shouldn't crash a download.
             pass
 
-    def submit(self, *, target: Callable[[Job], None], title: str, url: str) -> str:
+    def submit(
+        self,
+        *,
+        target: Callable[[Job], None],
+        title: str,
+        url: str,
+        auto_transcribe: bool = False,
+    ) -> str:
         job_id = uuid.uuid4().hex[:10]
-        job = Job(id=job_id, url=url, title=title, status=JobStatus.QUEUED)
+        job = Job(
+            id=job_id, url=url, title=title, status=JobStatus.QUEUED,
+            auto_transcribe=auto_transcribe,
+        )
         with self._lock:
             if self._queue_size == 0 and self._inflight >= self.max_workers:
                 raise RuntimeError("pool full")

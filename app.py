@@ -21,7 +21,7 @@ import transcribe_jobs
 import transcriber
 import transcript_io
 import time as _time
-from util import sanitize_filename
+from util import sanitize_filename, split_urls
 from routes.transcript_editor import bp as transcript_editor_bp
 
 
@@ -174,11 +174,24 @@ def create_app() -> Flask:
 
     # --- HTML fragment endpoints (htmx) ------------------------------------
 
+    def _form_bool(name: str) -> bool:
+        """Parse an HTML form checkbox value as a bool.
+
+        htmx + the standard browser form post both send the input's
+        ``value`` attribute (default "on") only when the box is checked,
+        and omit the field entirely when unchecked. So presence == True.
+        We also accept "1"/"true"/"yes" for callers that POST JSON-shaped
+        form data.
+        """
+        raw = (request.form.get(name) or "").strip().lower()
+        return raw in {"on", "1", "true", "yes"}
+
     @app.post("/api/info-card")
     @token_required
     def api_info_card():
         url = (request.form.get("url") or "").strip()
         format_choice = request.form.get("format", "video")
+        auto_transcribe = _form_bool("auto_transcribe")
         if not is_safe_url(url):
             return render_template("partials/card.html", card={
                 "kind": "error",
@@ -201,6 +214,7 @@ def create_app() -> Flask:
             "duration": result.duration,
             "format": format_choice,
             "formats": result.formats,
+            "auto_transcribe": auto_transcribe,
         })
 
     @app.post("/api/download-card")
@@ -211,18 +225,74 @@ def create_app() -> Flask:
         format_id = request.form.get("format_id") or None
         title = (request.form.get("title") or "").strip()
         thumbnail = (request.form.get("thumbnail") or "").strip()
+        auto_transcribe = _form_bool("auto_transcribe")
         if not is_safe_url(url):
             return render_template("partials/card.html", card={
                 "kind": "error", "url": url, "category": "unsupported_url",
             }), 400
         try:
-            job_id = _enqueue_download(url, format_choice, format_id, title, thumbnail)
+            job_id = _enqueue_download(
+                url, format_choice, format_id, title, thumbnail,
+                auto_transcribe=auto_transcribe,
+            )
         except RuntimeError:
             return render_template("partials/card.html", card={
                 "kind": "error", "url": url, "category": "busy",
             }), 503
         job = job_manager.get(job_id)
         return render_template("partials/card.html", card=_card_view(job))
+
+    @app.post("/api/batch-download")
+    @token_required
+    def api_batch_download():
+        """Accept a paste-blob of URLs; enqueue each as a download.
+
+        Skips the per-URL `ready` card / format picker — uses the global
+        format toggle (mp4 vs mp3, default quality) and optionally
+        auto-transcribes each on completion. Renders one card fragment
+        per URL, concatenated, so htmx ``afterbegin`` swaps them all
+        into the queue at once. Order is reversed so the first URL the
+        user pasted ends up at the top of the queue.
+        """
+        raw = request.form.get("urls") or request.form.get("url") or ""
+        format_choice = request.form.get("format", "video")
+        auto_transcribe = _form_bool("auto_transcribe")
+        urls = split_urls(raw)
+        if not urls:
+            return render_template("partials/card.html", card={
+                "kind": "error", "url": "", "category": "unsupported_url",
+            }), 400
+
+        rendered: list[str] = []
+        for url in urls:
+            if not is_safe_url(url):
+                rendered.append(render_template("partials/card.html", card={
+                    "kind": "error", "url": url, "category": "unsupported_url",
+                }))
+                continue
+            info = run_info(url)
+            if info.error_category:
+                rendered.append(render_template("partials/card.html", card={
+                    "kind": "error", "url": url, "category": info.error_category,
+                }))
+                continue
+            try:
+                job_id = _enqueue_download(
+                    url, format_choice, None,
+                    info.title or "", info.thumbnail or "",
+                    auto_transcribe=auto_transcribe,
+                )
+            except RuntimeError:
+                rendered.append(render_template("partials/card.html", card={
+                    "kind": "error", "url": url, "category": "busy",
+                }))
+                continue
+            job = job_manager.get(job_id)
+            rendered.append(render_template("partials/card.html", card=_card_view(job)))
+
+        # afterbegin prepends each fragment in turn — to keep the user's
+        # paste order top-to-bottom we have to render bottom-to-top.
+        return "".join(reversed(rendered))
 
     @app.get("/api/status-card/<job_id>")
     @token_required
@@ -314,6 +384,7 @@ def create_app() -> Flask:
             ext = os.path.splitext(result.file_path)[1] if result.file_path else ""
             j.file_path = result.file_path
             j.filename = sanitize_filename(title, ext)
+            _try_auto_transcribe(j)
 
         ok = job_manager.resume(job_id, target=_work)
         if not ok:
@@ -449,76 +520,10 @@ def create_app() -> Flask:
         base_no_ext = os.path.splitext(media_path)[0]  # downloads/<id>
         wav_path = base_no_ext + ".wav"
 
-        def _work(tj, *, model_path):
-            def _register_ffmpeg(proc):
-                # Stash the live ffmpeg Popen on the TranscribeJob so the
-                # /cancel endpoint (which calls TranscribeJobManager.cancel)
-                # can kill it mid-extract instead of waiting for it to
-                # complete. Cleared (set to None) when extract returns.
-                tj.process_handle = proc
-
-            try:
-                # 1. Extract audio
-                try:
-                    transcriber.extract_audio(
-                        media_path, wav_path,
-                        cancel_check=lambda: tj._cancel_flag,
-                        register_proc=_register_ffmpeg,
-                    )
-                except RuntimeError as e:
-                    # extract_audio raises RuntimeError("cancelled") when the
-                    # user hit cancel during ffmpeg — treat as a clean abort.
-                    if str(e) == "cancelled" or tj._cancel_flag:
-                        return
-                    raise
-                if tj._cancel_flag: return
-                transcribe_manager.update_progress(tj.id, 5)
-
-                # 2. Transcribe
-                result = transcriber.run_transcribe(
-                    audio_path=wav_path,
-                    model_path=model_path,
-                    progress_cb=lambda pct: transcribe_manager.update_progress(tj.id, pct),
-                    cancel_check=lambda: tj._cancel_flag,
-                )
-                if result.error == "cancelled" or tj._cancel_flag:
-                    return
-                if result.error:
-                    tj.status = transcribe_jobs.TranscribeStatus.ERROR
-                    tj.error_category = "transcribe_error"
-                    tj.error_message = result.error
-                    return
-
-                # 2.5 Diarize (best-effort; failure NEVER kills the transcribe).
-                # Only runs when TROVE_DIARIZATION=on AND the optional deps are
-                # installed. Default behavior is unchanged from pre-v3.1.
-                try:
-                    import diarizer
-                    if diarizer.available():
-                        chunks = diarizer.diarize(audio_path=wav_path)
-                        if chunks:
-                            transcriber.apply_speakers(result, chunks)
-                except Exception as e:
-                    app.logger.warning("diarization skipped: %s", e)
-
-                # 3. Write artifacts
-                transcriber.write_artifacts(result, base_no_ext)
-                tj.duration_seconds = result.duration
-                tj.language_detected = result.language
-            finally:
-                # Always remove the temp WAV — even on cancel/error/exception.
-                # The success path used to clean it up, but cancel/error early-
-                # returned and leaked a multi-MB file per aborted transcribe.
-                try:
-                    if os.path.exists(wav_path):
-                        os.remove(wav_path)
-                except OSError:
-                    pass
-
         tjid = transcribe_manager.submit(
             parent_job_id=parent_job_id,
             model_path=str(model_path),
-            target=_work,
+            target=_build_transcribe_target(media_path, base_no_ext, wav_path),
         )
         tj = transcribe_manager.get(tjid)
         return render_template("partials/transcribe_action.html", tj=tj, parent=parent)
@@ -638,7 +643,136 @@ def create_app() -> Flask:
     # routes/transcript_editor.py and were registered above as a Blueprint.
     # --- helpers -----------------------------------------------------------
 
-    def _enqueue_download(url: str, format_choice: str, format_id, title: str, thumbnail: str = "") -> str:
+    def _build_transcribe_target(media_path: str, base_no_ext: str, wav_path: str):
+        """Return the per-transcribe ``_work(tj, *, model_path)`` closure.
+
+        Extracted from api_transcribe_start so the auto-transcribe path
+        (triggered from inside the download worker on success) can reuse
+        the exact same body — extract → transcribe → diarize → artifacts
+        with consistent cancel semantics and WAV cleanup.
+        """
+        def _work(tj, *, model_path):
+            def _register_ffmpeg(proc):
+                # Stash the live ffmpeg Popen on the TranscribeJob so the
+                # /cancel endpoint (which calls TranscribeJobManager.cancel)
+                # can kill it mid-extract instead of waiting for it to
+                # complete. Cleared (set to None) when extract returns.
+                tj.process_handle = proc
+
+            try:
+                # 1. Extract audio
+                try:
+                    transcriber.extract_audio(
+                        media_path, wav_path,
+                        cancel_check=lambda: tj._cancel_flag,
+                        register_proc=_register_ffmpeg,
+                    )
+                except RuntimeError as e:
+                    # extract_audio raises RuntimeError("cancelled") when the
+                    # user hit cancel during ffmpeg — treat as a clean abort.
+                    if str(e) == "cancelled" or tj._cancel_flag:
+                        return
+                    raise
+                if tj._cancel_flag: return
+                transcribe_manager.update_progress(tj.id, 5)
+
+                # 2. Transcribe
+                result = transcriber.run_transcribe(
+                    audio_path=wav_path,
+                    model_path=model_path,
+                    progress_cb=lambda pct: transcribe_manager.update_progress(tj.id, pct),
+                    cancel_check=lambda: tj._cancel_flag,
+                )
+                if result.error == "cancelled" or tj._cancel_flag:
+                    return
+                if result.error:
+                    tj.status = transcribe_jobs.TranscribeStatus.ERROR
+                    tj.error_category = "transcribe_error"
+                    tj.error_message = result.error
+                    return
+
+                # 2.5 Diarize (best-effort; failure NEVER kills the transcribe).
+                # Only runs when TROVE_DIARIZATION=on AND the optional deps are
+                # installed. Default behavior is unchanged from pre-v3.1.
+                try:
+                    import diarizer
+                    if diarizer.available():
+                        chunks = diarizer.diarize(audio_path=wav_path)
+                        if chunks:
+                            transcriber.apply_speakers(result, chunks)
+                except Exception as e:
+                    app.logger.warning("diarization skipped: %s", e)
+
+                # 3. Write artifacts
+                transcriber.write_artifacts(result, base_no_ext)
+                tj.duration_seconds = result.duration
+                tj.language_detected = result.language
+            finally:
+                # Always remove the temp WAV — even on cancel/error/exception.
+                # The success path used to clean it up, but cancel/error early-
+                # returned and leaked a multi-MB file per aborted transcribe.
+                try:
+                    if os.path.exists(wav_path):
+                        os.remove(wav_path)
+                except OSError:
+                    pass
+
+        return _work
+
+    def _try_auto_transcribe(parent: Job) -> None:
+        """Submit a transcribe for a just-completed download, if requested.
+
+        Called from inside the download worker AFTER ``job.file_path`` is
+        set and BEFORE the worker returns (i.e. before JobManager flips
+        status to DONE). We deliberately do not check ``parent.status`` —
+        the caller has just confirmed a successful download and any
+        cancel/error path returns earlier without invoking us.
+
+        Degrades gracefully:
+        - No active model installed → set ``_auto_transcribe_hint`` so
+          the DONE card can render a "set up a model" link, then return.
+        - A transcribe for this parent is already queued/running/done →
+          no-op (idempotent; protects against double-fires).
+        """
+        if not parent.auto_transcribe or not parent.file_path:
+            return
+        # Cancel race: /api/job/<id>/cancel can flip status to CANCELLED
+        # while we're inside _work. The download still wrote file_path
+        # before the kill landed, but the user clearly doesn't want the
+        # follow-up transcribe. Same for ERROR (a late error category set
+        # by the runner). PAUSED is benign — pause-then-success races
+        # legitimately become DONE in JobManager._run, which is the
+        # behavior we want.
+        if parent.status in (JobStatus.CANCELLED, JobStatus.ERROR):
+            return
+        model_path = models_store.get_active_path()
+        if model_path is None:
+            parent._auto_transcribe_hint = "no_active_model"
+            return
+        existing = transcribe_manager.get_by_parent(parent.id)
+        if existing and existing.status in (
+            transcribe_jobs.TranscribeStatus.QUEUED,
+            transcribe_jobs.TranscribeStatus.RUNNING,
+            transcribe_jobs.TranscribeStatus.DONE,
+        ):
+            return
+        base_no_ext = os.path.splitext(parent.file_path)[0]
+        wav_path = base_no_ext + ".wav"
+        try:
+            transcribe_manager.submit(
+                parent_job_id=parent.id,
+                model_path=str(model_path),
+                target=_build_transcribe_target(parent.file_path, base_no_ext, wav_path),
+            )
+        except Exception as e:
+            # Never let a transcribe-submit failure poison the download
+            # job — it's an opportunistic add-on, not the core contract.
+            app.logger.warning("auto-transcribe submit failed for %s: %s", parent.id, e)
+
+    def _enqueue_download(
+        url: str, format_choice: str, format_id, title: str,
+        thumbnail: str = "", *, auto_transcribe: bool = False,
+    ) -> str:
         def _work(job: Job):
             job.thumbnail = thumbnail
             job.format_choice = format_choice
@@ -675,8 +809,11 @@ def create_app() -> Flask:
             ext = os.path.splitext(result.file_path)[1] if result.file_path else ""
             job.file_path = result.file_path
             job.filename = sanitize_filename(title, ext)
+            _try_auto_transcribe(job)
 
-        return job_manager.submit(target=_work, title=title, url=url)
+        return job_manager.submit(
+            target=_work, title=title, url=url, auto_transcribe=auto_transcribe,
+        )
 
     def _card_view(job: Job) -> dict:
         # Bytes-based percent when we know the total. HLS streams (YouTube) leave
@@ -710,6 +847,13 @@ def create_app() -> Flask:
                 tj=tj,
                 parent=job,
             )
+            # Surface the "auto-transcribe wanted but no active model"
+            # hint so the user knows why a transcribe didn't fire and
+            # can click through to /transcribe/setup. The hint is a
+            # transient flag set inside the download worker; it doesn't
+            # survive a server restart.
+            if getattr(job, "_auto_transcribe_hint", None):
+                view["auto_transcribe_hint"] = job._auto_transcribe_hint
         return view
 
     return app

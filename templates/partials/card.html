@@ -75,6 +75,9 @@
     <input type="hidden" name="title" value="{{ card.title or '' }}">
     <input type="hidden" name="thumbnail" value="{{ card.thumbnail or '' }}">
     <input type="hidden" name="format" value="{{ card.format or 'video' }}">
+    {% if card.auto_transcribe %}
+      <input type="hidden" name="auto_transcribe" value="on">
+    {% endif %}
     {% if card.formats and (card.format or 'video') == 'video' %}
       <select name="format_id" class="clip-picker">
         {% for f in card.formats %}
@@ -172,6 +175,11 @@
                 hx-target="closest .clip-transcribe-row"
                 hx-swap="outerHTML">▸ transcribe</button>
       </span>
+    {% endif %}
+    {% if card.auto_transcribe_hint == "no_active_model" %}
+      <p class="clip-transcribe-hint">
+        auto-transcribe skipped — <a href="/transcribe/setup">install a model ↗</a>
+      </p>
     {% endif %}
   </div>
   <div class="clip-action">

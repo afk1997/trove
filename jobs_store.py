@@ -26,6 +26,7 @@ _PERSISTENT_FIELDS = (
     "downloaded_bytes", "total_bytes", "speed", "eta",
     "fragment_index", "fragment_count",
     "format_choice", "format_id", "out_template",
+    "auto_transcribe",
 )
 
 
@@ -60,6 +61,7 @@ def _job_from_dict(data: dict) -> Job:
         format_choice=data.get("format_choice") or "video",
         format_id=data.get("format_id"),
         out_template=data.get("out_template") or "",
+        auto_transcribe=bool(data.get("auto_transcribe") or False),
     )
 
 
