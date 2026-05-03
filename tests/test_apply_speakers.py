@@ -195,15 +195,32 @@ def test_empty_words_is_noop():
 
 def test_chunks_with_overlap_picks_first():
     """If chunks overlap (silero-vad shouldn't do this, but be defensive),
-    take the speaker from the first chunk that contains the word."""
+    pick the chunk with the largest temporal overlap; equal-overlap ties
+    go to the earlier chunk for determinism."""
     res = _result([{"w": "hi", "start": 1.5, "end": 1.8}])
-    # Two chunks overlap on [1.0, 2.0); first by start time wins.
+    # Word [1.5, 1.8] overlaps Alice (0.3s) and Bob (0.3s) equally.
+    # Tie-break favors the earlier-starting chunk → Alice.
     chunks = [
         _Chunk(0.0, 2.0, "Alice"),
         _Chunk(1.0, 3.0, "Bob"),
     ]
     transcriber.apply_speakers(res, chunks)
     assert res.words[0]["speaker"] == "Alice"
+
+
+def test_boundary_word_assigned_by_max_overlap_not_start():
+    """REGRESSION: a word straddling a speaker boundary should land with
+    the speaker who holds the BULK of the word, not whoever happens to
+    own the start instant. Word [0.4, 0.8] with Alice [0.0, 0.5] (0.1s
+    overlap) and Bob [0.5, 1.0] (0.3s overlap) → Bob wins. Start-only
+    assignment used to mislabel this as Alice."""
+    res = _result([{"w": "yeah", "start": 0.4, "end": 0.8}])
+    chunks = [
+        _Chunk(0.0, 0.5, "Alice"),
+        _Chunk(0.5, 1.0, "Bob"),
+    ]
+    transcriber.apply_speakers(res, chunks)
+    assert res.words[0]["speaker"] == "Bob"
 
 
 # ---------------------------------------------------------------------------

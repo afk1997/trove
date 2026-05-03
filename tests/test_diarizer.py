@@ -281,3 +281,95 @@ def test_diarize_returns_empty_when_no_speech(monkeypatch):
     monkeypatch.setattr(d, "_vad_speech_chunks", lambda _p: [])
     out = d.diarize(audio_path="ignored.wav")
     assert out == []
+
+
+# ---------------------------------------------------------------------------
+# Encoder caching (audit #12): the heavy ``VoiceEncoder`` should be built
+# at most once per process — not per diarization job.
+# ---------------------------------------------------------------------------
+
+def _install_stub_module(monkeypatch, name: str, **attrs):
+    """Install a stub module at ``sys.modules[name]`` for the test.
+
+    If the real module is already imported, monkeypatch.setattr is used
+    so mutations to its attributes are auto-reverted (avoiding cross-
+    test pollution that breaks the audio-alignment suite).
+    """
+    if name in sys.modules and sys.modules[name] is not None:
+        for k, v in attrs.items():
+            monkeypatch.setattr(sys.modules[name], k, v, raising=False)
+    else:
+        stub = types.ModuleType(name)
+        for k, v in attrs.items():
+            setattr(stub, k, v)
+        monkeypatch.setitem(sys.modules, name, stub)
+
+
+def test_get_encoder_caches_across_calls(monkeypatch):
+    """Two ``_get_encoder()`` calls must return the SAME instance and
+    construct ``VoiceEncoder`` exactly once. Per-job instantiation
+    (the old behavior) loaded ~50MB of weights every transcribe."""
+    d = _fresh_diarizer()
+    # Reset any cache prior tests may have populated, AND make sure
+    # we don't leak a stub encoder into the real diarizer module that
+    # other test files import. monkeypatch reverts both on teardown.
+    monkeypatch.setattr(d, "_ENCODER", None, raising=False)
+    import diarizer as _real_d  # may be a different module instance
+    monkeypatch.setattr(_real_d, "_ENCODER", _real_d._ENCODER, raising=False)
+
+    constructed = []
+
+    class _StubEncoder:
+        def __init__(self):
+            constructed.append(self)
+
+    _install_stub_module(monkeypatch, "resemblyzer", VoiceEncoder=_StubEncoder)
+
+    e1 = d._get_encoder()
+    e2 = d._get_encoder()
+    assert e1 is e2, "second call must return the cached encoder"
+    assert len(constructed) == 1, \
+        f"VoiceEncoder must be constructed once, was {len(constructed)}"
+
+
+def test_get_encoder_raises_unavailable_when_resemblyzer_missing(monkeypatch):
+    d = _fresh_diarizer()
+    monkeypatch.setattr(d, "_ENCODER", None, raising=False)
+
+    # Force the lazy import to fail.
+    monkeypatch.setitem(sys.modules, "resemblyzer", None)
+    with pytest.raises(d.DiarizationUnavailable):
+        d._get_encoder()
+
+
+def test_warm_returns_false_when_flag_off(monkeypatch):
+    monkeypatch.setenv("TROVE_DIARIZATION", "off")
+    d = _fresh_diarizer()
+    assert d.warm() is False
+
+
+def test_warm_constructs_encoder_when_available(monkeypatch):
+    monkeypatch.setenv("TROVE_DIARIZATION", "on")
+    d = _fresh_diarizer()
+    monkeypatch.setattr(d, "_ENCODER", None, raising=False)
+    import diarizer as _real_d
+    monkeypatch.setattr(_real_d, "_ENCODER", _real_d._ENCODER, raising=False)
+
+    constructed = []
+
+    class _StubEncoder:
+        def __init__(self):
+            constructed.append(self)
+
+    # Use _install_stub_module so we don't permanently mutate the real
+    # resemblyzer.VoiceEncoder (which would corrupt every later test
+    # that calls into the real encoder via _get_encoder).
+    _install_stub_module(monkeypatch, "resemblyzer", VoiceEncoder=_StubEncoder)
+    _install_stub_module(monkeypatch, "sklearn")
+    _install_stub_module(monkeypatch, "torch")
+
+    assert d.warm() is True
+    assert len(constructed) == 1
+    # Idempotent — second warm() doesn't rebuild.
+    assert d.warm() is True
+    assert len(constructed) == 1

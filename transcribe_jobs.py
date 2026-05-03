@@ -38,6 +38,14 @@ class TranscribeJob:
     language_detected: str = ""
     error_category: str | None = None
     error_message: str | None = None
+    # Diarization outcome — independent of overall transcribe status.
+    # ``None``     → not attempted (feature off or deps missing)
+    # "complete"  → ran successfully and chunks were applied
+    # "empty"     → ran successfully but no speech detected (no chunks)
+    # "failed"    → enabled but raised; error captured in diarization_error
+    diarization_status: str | None = None
+    diarization_error: str | None = None
+    speaker_count: int | None = None
     # Not persisted:
     process_handle: object | None = None
     _cancel_flag: bool = False
@@ -47,6 +55,7 @@ _PERSISTENT_FIELDS = {
     "id", "parent_job_id", "status", "progress_pct", "started_at",
     "duration_seconds", "model_used", "language_detected",
     "error_category", "error_message",
+    "diarization_status", "diarization_error", "speaker_count",
 }
 
 
@@ -90,6 +99,9 @@ class TranscribeJobManager:
                     language_detected=raw.get("language_detected", ""),
                     error_category=raw.get("error_category"),
                     error_message=raw.get("error_message"),
+                    diarization_status=raw.get("diarization_status"),
+                    diarization_error=raw.get("diarization_error"),
+                    speaker_count=raw.get("speaker_count"),
                 )
                 self._jobs[jid] = job
             except (KeyError, ValueError):

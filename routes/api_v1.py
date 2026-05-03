@@ -282,6 +282,9 @@ def _tj_view(tj) -> dict:
         "elapsed_seconds": round(elapsed, 1),
         "error_category": tj.error_category,
         "error_message": tj.error_message,
+        "diarization_status": tj.diarization_status,
+        "diarization_error": tj.diarization_error,
+        "speaker_count": tj.speaker_count,
     }
     out["human"] = {
         "progress": f"{tj.progress_pct}%",

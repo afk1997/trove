@@ -824,15 +824,32 @@ def create_app() -> Flask:
 
                 # 2.5 Diarize (best-effort; failure NEVER kills the transcribe).
                 # Only runs when TROVE_DIARIZATION=on AND the optional deps are
-                # installed. Default behavior is unchanged from pre-v3.1.
+                # installed. Outcome is recorded on the TranscribeJob so the
+                # API/CLI/MCP can surface "diarization failed: <reason>" to the
+                # user instead of silently dropping speaker labels:
+                #   None     → not attempted (feature off / deps missing)
+                #   complete → chunks applied; speaker_count set
+                #   empty    → ran but no speech detected
+                #   failed   → exception during diarize; reason in diarization_error
                 try:
                     import diarizer
                     if diarizer.available():
-                        chunks = diarizer.diarize(audio_path=wav_path)
-                        if chunks:
-                            transcriber.apply_speakers(result, chunks)
+                        try:
+                            chunks = diarizer.diarize(audio_path=wav_path)
+                            if chunks:
+                                transcriber.apply_speakers(result, chunks)
+                                tj.diarization_status = "complete"
+                                tj.speaker_count = len({c.speaker for c in chunks})
+                            else:
+                                tj.diarization_status = "empty"
+                                tj.speaker_count = 0
+                        except Exception as e:
+                            tj.diarization_status = "failed"
+                            tj.diarization_error = str(e) or type(e).__name__
+                            app.logger.warning("diarization failed: %s", e)
                 except Exception as e:
-                    app.logger.warning("diarization skipped: %s", e)
+                    # diarizer module itself didn't import — treat as not attempted.
+                    app.logger.warning("diarizer unavailable: %s", e)
 
                 # 3. Write artifacts
                 transcriber.write_artifacts(result, base_no_ext)

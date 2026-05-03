@@ -26,11 +26,56 @@ is "off" because the deps are ~800MB and not bundled with Trove.
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass
 
 
 class DiarizationUnavailable(RuntimeError):
     """Raised when heavy deps aren't installed or the feature flag is off."""
+
+
+# Process-wide ``VoiceEncoder`` cache. Constructing the encoder loads
+# ~50MB of weights and takes a few seconds; per-job instantiation made
+# repeated transcribes slow and memory-churny. ``_get_encoder()`` lazily
+# builds it once and every later diarize() reuses the same instance.
+_ENCODER = None
+_ENCODER_LOCK = threading.Lock()
+
+
+def _get_encoder():
+    """Return the cached ``VoiceEncoder``, building it on first use.
+
+    Lazy-imports resemblyzer so the module still loads on a stock
+    Python install. Raises ``DiarizationUnavailable`` if the import
+    fails.
+    """
+    global _ENCODER
+    with _ENCODER_LOCK:
+        if _ENCODER is None:
+            try:
+                from resemblyzer import VoiceEncoder
+            except Exception as e:
+                raise DiarizationUnavailable(
+                    f"resemblyzer not installed: {e}") from e
+            _ENCODER = VoiceEncoder()
+        return _ENCODER
+
+
+def warm() -> bool:
+    """Eagerly load the encoder so the first diarize() call is fast.
+
+    Useful for health checks or a "warm models" admin path so users
+    aren't surprised by a multi-second pause on their first transcribe.
+    Returns True on success, False when diarization isn't available
+    (feature flag off or deps missing).
+    """
+    if not available():
+        return False
+    try:
+        _get_encoder()
+        return True
+    except DiarizationUnavailable:
+        return False
 
 
 @dataclass
@@ -151,7 +196,6 @@ def _embed_chunks(audio_path: str, chunks: list[dict]):
     skip the silence trim.
     """
     try:
-        from resemblyzer import VoiceEncoder
         from resemblyzer.audio import (
             normalize_volume,
             audio_norm_target_dBFS,
@@ -161,7 +205,7 @@ def _embed_chunks(audio_path: str, chunks: list[dict]):
         import numpy as np
     except Exception as e:
         raise DiarizationUnavailable(f"resemblyzer not installed: {e}") from e
-    encoder = VoiceEncoder()
+    encoder = _get_encoder()
     wav, source_sr = librosa.load(audio_path, sr=None)
     if source_sr != _RES_SR:
         wav = librosa.resample(wav, orig_sr=source_sr, target_sr=_RES_SR)

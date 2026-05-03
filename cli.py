@@ -435,6 +435,17 @@ def _render_transcript_card(t: dict, *, json_out: bool) -> None:
     print(f"  audio:    {h.get('audio_duration','—')}    elapsed: {h.get('elapsed','—')}")
     if t.get("language_detected"):
         print(f"  lang:     {t['language_detected']}")
+    # Diarization is independent of overall transcribe status — surface it
+    # so users can see "speakers missing because diarization failed" instead
+    # of guessing why their .words.json has no speaker labels.
+    dstatus = t.get("diarization_status")
+    if dstatus:
+        bits = [dstatus]
+        if t.get("speaker_count") is not None:
+            bits.append(f"{t['speaker_count']} speaker(s)")
+        if t.get("diarization_error"):
+            bits.append(f"— {t['diarization_error']}")
+        print(f"  speakers: {' '.join(bits)}")
     if t.get("error_message"):
         print(f"  error:    {t['error_category']} — {t['error_message']}")
 

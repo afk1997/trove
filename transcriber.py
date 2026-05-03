@@ -308,10 +308,17 @@ def apply_speakers(result: "TranscriptResult", chunks: list) -> None:
     """Assign a speaker to each word and regroup ``result.segments``.
 
     Each word in ``result.words`` is tagged with the speaker of the
-    diarization chunk whose [start, end) interval contains the word's
-    start time. Words that fall OUTSIDE any chunk (whisper detected speech
-    where silero-vad didn't, e.g. a brief greeting or a one-word bridge in
-    a tiny gap) inherit the speaker of their nearest assigned neighbor:
+    diarization chunk that has MAXIMUM TEMPORAL OVERLAP with the word's
+    [start, end) interval. Overlap (rather than start-only containment)
+    keeps short words like "I", "yeah", "no" stable when their start
+    falls a few ms inside the wrong chunk near a speaker boundary —
+    the bulk of the word still belongs to the right speaker, so that's
+    who it gets attributed to. Ties (equal overlap) go to the earlier
+    chunk for determinism.
+
+    Words that fall OUTSIDE any chunk (whisper detected speech where
+    silero-vad didn't, e.g. a brief greeting or a one-word bridge in a
+    tiny gap) inherit the speaker of their nearest assigned neighbor:
     forward-fill from the previous assigned word, with leading orphans
     backward-filled from the first assigned word.
 
@@ -330,14 +337,24 @@ def apply_speakers(result: "TranscriptResult", chunks: list) -> None:
     sorted_chunks = sorted(chunks, key=lambda c: c.start)
     for w in result.words:
         ws = float(w["start"])
-        spk = None
+        we = float(w["end"])
+        best_overlap = 0.0
+        best_spk = None
         for c in sorted_chunks:
-            if c.start <= ws < c.end:
-                spk = c.speaker
+            # Chunks are sorted by start; once a chunk starts at or after
+            # the word ends, no later chunk can overlap.
+            if c.start >= we:
                 break
-            if c.start > ws:
-                break
-        w["speaker"] = spk
+            if c.end <= ws:
+                # Entirely before this word; keep scanning forward.
+                continue
+            ov = min(we, c.end) - max(ws, c.start)
+            # Strict ``>`` so that a tie goes to the earlier chunk
+            # (preserves the legacy "first wins on overlap" behavior).
+            if ov > best_overlap:
+                best_overlap = ov
+                best_spk = c.speaker
+        w["speaker"] = best_spk
 
     # Pass 2: forward-fill None speakers from the previous assigned word.
     last_spk = None

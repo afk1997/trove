@@ -176,6 +176,11 @@ def test_pipeline_with_diarization_stub_writes_speakers(tmp_path, monkeypatch):
     assert tj.status == transcribe_jobs.TranscribeStatus.DONE, \
         f"expected DONE, got {tj.status} ({tj.error_category}: {tj.error_message})"
 
+    # Diarization outcome must be surfaced on the TranscribeJob
+    assert tj.diarization_status == "complete"
+    assert tj.diarization_error is None
+    assert tj.speaker_count == 2
+
     # Verify .words.json has speakers
     payload = json.loads(Path(base_no_ext + ".words.json").read_text())
     assert payload["schema_version"] == 2
@@ -217,6 +222,11 @@ def test_pipeline_diarization_off_skips_diarize(tmp_path, monkeypatch):
     assert tj.status == transcribe_jobs.TranscribeStatus.DONE
 
     assert diarize_called == [], "diarize must not run when available()=False"
+    # Feature off → diarization_status stays None (not attempted),
+    # not "skipped" or "failed" (those reserve specific meanings).
+    assert tj.diarization_status is None
+    assert tj.diarization_error is None
+    assert tj.speaker_count is None
 
     base = os.path.splitext(parent.file_path)[0]
     payload = json.loads(Path(base + ".words.json").read_text())
@@ -253,6 +263,12 @@ def test_pipeline_diarize_failure_doesnt_kill_transcribe(tmp_path, monkeypatch):
     assert tj.status == transcribe_jobs.TranscribeStatus.DONE, \
         "diarize failure must NOT promote to ERROR"
 
+    # The transcribe still completes, but the diarization failure is
+    # surfaced on the TranscribeJob — not silently swallowed.
+    assert tj.diarization_status == "failed"
+    assert "boom" in (tj.diarization_error or "")
+    assert tj.speaker_count is None
+
     base = os.path.splitext(parent.file_path)[0]
     payload = json.loads(Path(base + ".words.json").read_text())
     assert all(s.get("speaker") is None for s in payload["segments"])
@@ -288,6 +304,10 @@ def test_pipeline_diarize_empty_chunks_keeps_speakers_none(tmp_path, monkeypatch
     tjs = [t for t in tm.snapshot_jobs() if t.parent_job_id == parent.id]
     tj = _wait(tm, tjs[0].id)
     assert tj.status == transcribe_jobs.TranscribeStatus.DONE
+    # Diarizer ran cleanly but found no speech — distinct from "failed".
+    assert tj.diarization_status == "empty"
+    assert tj.diarization_error is None
+    assert tj.speaker_count == 0
 
 
 # ---------------------------------------------------------------------------
