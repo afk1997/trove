@@ -272,6 +272,28 @@ class TroveClient:
         return self.get(f"/api/v1/transcripts/{tid}/export.{fmt}",
                         stream_to=stream_to)
 
+    def get_transcript_chunk(self, tid: str, fmt: str = "txt", *,
+                             offset: int = 0,
+                             limit: int | None = None) -> dict:
+        """Paginated read of a transcript (server-side ``/chunk``).
+
+        ``fmt`` is one of ``txt|srt|vtt|json``. ``offset`` is a *byte*
+        offset for text formats and a *segment* index for ``json``.
+        ``limit`` follows the server-side defaults (4000 bytes or 50
+        segments) when omitted. Returns the JSON envelope verbatim so
+        callers can drive their own pagination loop on
+        ``has_more`` / ``offset + returned``.
+        """
+        if fmt not in {"txt", "srt", "vtt", "json"}:
+            raise ValueError(f"unknown export format: {fmt!r}")
+        parts = [f"format={fmt}"]
+        if offset:
+            parts.append(f"offset={int(offset)}")
+        if limit is not None:
+            parts.append(f"limit={int(limit)}")
+        qs = "?" + "&".join(parts)
+        return self.get(f"/api/v1/transcripts/{tid}/chunk" + qs)
+
     def search_transcripts(self, query: str, *, limit: int = 50,
                            context: int = 60) -> dict:
         qs = (f"?q={urllib.parse.quote(query)}"

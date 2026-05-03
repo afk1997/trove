@@ -48,6 +48,7 @@ MCP_TO_CLI: dict[str, str] = {
     "transcribe":              "transcribe",
     "cancel_transcribe":       "transcribe-cancel",
     "get_transcript":          "transcript",
+    "get_transcript_chunk":    "transcript-chunk",
     "list_models":             "models",
     "install_model":           "model-install",
     "model_install_progress":  "model-progress",
@@ -522,6 +523,37 @@ def cmd_model_progress(args) -> int:
     return 0
 
 
+def cmd_transcript_chunk(args) -> int:
+    """Read a slice of a transcript (mirror of MCP `get_transcript_chunk`).
+
+    Default behavior prints the JSON envelope so scripts can drive
+    their own pagination loop. ``--content-only`` prints just the
+    text body (txt/srt/vtt) for direct piping into ``less`` / ``rg``.
+    """
+    qs = [f"format={args.format}"]
+    if args.offset:
+        qs.append(f"offset={int(args.offset)}")
+    if args.limit:
+        qs.append(f"limit={int(args.limit)}")
+    body = get(f"/api/v1/transcripts/{args.id}/chunk?" + "&".join(qs))
+    if getattr(args, "json", False) or args.format == "json":
+        _print_json(body)
+        return 0
+    if getattr(args, "content_only", False):
+        sys.stdout.write(body.get("content", ""))
+        if not str(body.get("content", "")).endswith("\n"):
+            sys.stdout.write("\n")
+        return 0
+    # Default human view: short header + content.
+    print(f"{args.id} [{body['format']}] "
+          f"offset={body['offset']} returned={body['returned']} "
+          f"total={body['total']} has_more={body['has_more']}")
+    sys.stdout.write(body.get("content", ""))
+    if body.get("content") and not body["content"].endswith("\n"):
+        sys.stdout.write("\n")
+    return 0
+
+
 def cmd_transcript(args) -> int:
     path = f"/api/v1/transcripts/{args.id}/export.{args.format}"
     if args.output:
@@ -801,6 +833,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-f", "--format", choices=("txt", "srt", "vtt", "json"), default="txt")
     s.add_argument("-o", "--output", help="write to a file instead of stdout")
     s.set_defaults(func=cmd_transcript)
+
+    s = _sub("transcript-chunk",
+             help="read one paginated slice of a transcript (for MCP / scripts)")
+    s.add_argument("id")
+    s.add_argument("-f", "--format", choices=("txt", "srt", "vtt", "json"), default="txt")
+    s.add_argument("--offset", type=int, default=0,
+                   help="char offset for txt/srt/vtt; segment index for json")
+    s.add_argument("--limit", type=int, default=0,
+                   help="max units per page (0 = server default: 4000 chars / 50 segments)")
+    s.add_argument("--content-only", action="store_true",
+                   help="print just the text body, no envelope header (txt/srt/vtt only)")
+    s.set_defaults(func=cmd_transcript_chunk)
 
     s = _sub("models", help="list whisper models")
     s.set_defaults(func=cmd_models)

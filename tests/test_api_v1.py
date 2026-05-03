@@ -646,6 +646,190 @@ def test_search_returns_matches_with_snippet(client, tmp_path):
     assert m["start_seconds"] == pytest.approx(0.5)
 
 
+# ---- chunked transcript read ---------------------------------------
+
+def _seed_done_transcript(app, tmp_path, *, body_text: str | None = None,
+                          words_data: dict | None = None):
+    """Drop a finished parent job + transcribe job + on-disk artifacts.
+
+    Returns the artifact base path so callers can stat the rendered
+    files. The parent's ``file_path`` lives under the configured
+    download dir so the export / chunk endpoint's ``os.path.exists``
+    check passes the same way it does in production.
+    """
+    import json as _json
+    dd = app.extensions["trove.download_dir"]
+    os.makedirs(dd, exist_ok=True)
+    media = dd / "abc.mp4"
+    media.write_bytes(b"x")
+    base = str(dd / "abc")
+    if body_text is not None:
+        with open(base + ".txt", "w", encoding="utf-8") as f:
+            f.write(body_text)
+    if words_data is not None:
+        with open(base + ".words.json", "w") as f:
+            _json.dump(words_data, f)
+    jm = app.extensions["trove.jobs"]
+    jm._jobs["abc"] = Job(id="abc", url="https://x", title="Clip",
+                          status=JobStatus.DONE, file_path=str(media))
+    tm = app.extensions["trove.transcribe"]
+    tm._jobs["t1"] = transcribe_jobs.TranscribeJob(
+        id="t1", parent_job_id="abc", model_used="m",
+        status=transcribe_jobs.TranscribeStatus.DONE,
+    )
+    return base
+
+
+def test_chunk_text_format_default_returns_full_body(client, tmp_path):
+    app, c = client
+    _seed_done_transcript(app, tmp_path, body_text="hello world\n")
+    r = c.get("/api/v1/transcripts/t1/chunk")  # default format=txt, default limit
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["format"] == "txt"
+    assert body["offset"] == 0
+    assert body["total"] == len(b"hello world\n")
+    assert body["returned"] == body["total"]
+    assert body["has_more"] is False
+    assert body["content"] == "hello world\n"
+
+
+def test_chunk_text_paginates_by_bytes(client, tmp_path):
+    """Stitching pages back together must reproduce the original body
+    byte-for-byte. Pinning this contract lets MCP clients trust the
+    has_more / offset+returned pagination loop."""
+    app, c = client
+    full = "abcdefghij" * 50  # 500 chars / 500 bytes (ascii)
+    _seed_done_transcript(app, tmp_path, body_text=full)
+
+    pages: list[str] = []
+    offset = 0
+    while True:
+        r = c.get(f"/api/v1/transcripts/t1/chunk?format=txt&offset={offset}&limit=120")
+        body = r.get_json()
+        assert body["total"] == 500
+        assert body["limit"] == 120
+        pages.append(body["content"])
+        offset += body["returned"]
+        if not body["has_more"]:
+            break
+    assert "".join(pages) == full
+    assert offset == 500
+
+
+def test_chunk_text_preserves_crlf_bytes(client, tmp_path):
+    """Architect P1 regression: text-mode `open(..., "r")` would
+    silently translate CRLF→LF, making the `total` byte count
+    disagree with the bytes /export.<fmt> serves. Reading binary
+    keeps the wire bytes faithful to disk."""
+    app, c = client
+    body_text = "line1\r\nline2\r\nline3\r\n"  # 21 bytes on disk
+    _seed_done_transcript(app, tmp_path, body_text=body_text)
+    body = c.get("/api/v1/transcripts/t1/chunk").get_json()
+    assert body["total"] == 21
+    assert body["returned"] == 21
+    # ``\r`` survives the round-trip: would be stripped by text-mode read.
+    assert body["content"].count("\r\n") == 3
+
+
+def test_chunk_text_clamps_limit_to_max(client, tmp_path):
+    """A pathological ``?limit=999999`` must be capped server-side
+    so the response can't exceed the documented ceiling."""
+    app, c = client
+    _seed_done_transcript(app, tmp_path, body_text="x" * 100)
+    body = c.get("/api/v1/transcripts/t1/chunk?limit=999999").get_json()
+    assert body["limit"] == 64000   # _CHUNK_TEXT_MAX_LIMIT
+    assert body["returned"] == 100  # capped at total available
+
+
+def test_chunk_text_limit_zero_means_default_not_empty(client, tmp_path):
+    """Architect P1 regression: ``?limit=0`` must NOT mean "return
+    zero bytes" — that produced ``returned=0, has_more=true`` which
+    deadlocked any naive paginator. Collapse 0 → server default."""
+    app, c = client
+    _seed_done_transcript(app, tmp_path, body_text="hello")
+    body = c.get("/api/v1/transcripts/t1/chunk?limit=0").get_json()
+    assert body["limit"] == 4000   # _CHUNK_TEXT_DEFAULT_LIMIT
+    assert body["returned"] == 5
+    assert body["has_more"] is False
+
+
+def test_chunk_text_offset_past_end_returns_empty(client, tmp_path):
+    app, c = client
+    _seed_done_transcript(app, tmp_path, body_text="hello")
+    body = c.get("/api/v1/transcripts/t1/chunk?offset=999").get_json()
+    assert body["returned"] == 0
+    assert body["content"] == ""
+    assert body["has_more"] is False
+
+
+def test_chunk_json_slices_segments_and_filters_words(client, tmp_path):
+    """Json mode is the whole reason this endpoint exists: returning
+    just the requested segments + only the words those segments
+    reference, so an MCP caller pulling segment[7] doesn't pay for
+    every word in the transcript."""
+    app, c = client
+    words = [{"idx": i, "w": f"w{i}", "original_w": f"w{i}",
+              "start": float(i), "end": float(i) + 0.5,
+              "edited": False, "deleted": False} for i in range(10)]
+    segments = [
+        {"start": 0.0, "end": 2.5, "text": "first",  "word_idxs": [0, 1, 2], "speaker": None},
+        {"start": 2.5, "end": 5.5, "text": "second", "word_idxs": [3, 4, 5], "speaker": None},
+        {"start": 5.5, "end": 9.5, "text": "third",  "word_idxs": [6, 7, 8, 9], "speaker": None},
+    ]
+    _seed_done_transcript(app, tmp_path, words_data={
+        "schema_version": 2, "language": "en", "duration": 9.5,
+        "words": words, "segments": segments,
+    })
+
+    body = c.get("/api/v1/transcripts/t1/chunk?format=json&offset=1&limit=1").get_json()
+    assert body["format"] == "json"
+    assert body["offset"] == 1 and body["limit"] == 1
+    assert body["total"] == 3 and body["returned"] == 1
+    assert body["has_more"] is True
+    assert body["total_words"] == 10
+    assert len(body["segments"]) == 1
+    assert body["segments"][0]["text"] == "second"
+    # Only words 3,4,5 (referenced by the returned segment) come along.
+    assert sorted(w["idx"] for w in body["words"]) == [3, 4, 5]
+    # v2 schema metadata is surfaced so callers know what they're getting.
+    assert body["schema_version"] == 2
+    assert body["language"] == "en"
+    assert body["duration"] == 9.5
+
+
+def test_chunk_json_clamps_segment_limit(client, tmp_path):
+    app, c = client
+    _seed_done_transcript(app, tmp_path, words_data={
+        "schema_version": 2, "duration": 0.0, "words": [], "segments": [],
+    })
+    body = c.get("/api/v1/transcripts/t1/chunk?format=json&limit=999999").get_json()
+    assert body["limit"] == 500  # _CHUNK_JSON_MAX_LIMIT
+
+
+def test_chunk_rejects_invalid_format(client, tmp_path):
+    app, c = client
+    _seed_done_transcript(app, tmp_path, body_text="x")
+    r = c.get("/api/v1/transcripts/t1/chunk?format=pdf")
+    assert r.status_code == 404
+    assert r.get_json()["error"] == "invalid_format"
+
+
+def test_chunk_rejects_invalid_offset(client, tmp_path):
+    app, c = client
+    _seed_done_transcript(app, tmp_path, body_text="x")
+    r = c.get("/api/v1/transcripts/t1/chunk?offset=abc")
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "invalid_offset"
+
+
+def test_chunk_404s_when_transcript_missing(client):
+    _, c = client
+    r = c.get("/api/v1/transcripts/nope/chunk")
+    assert r.status_code == 404
+    assert r.get_json()["error"] == "transcript_not_found_or_not_done"
+
+
 # ---- OpenAPI --------------------------------------------------------
 
 def test_openapi_documents_every_v1_route(client):

@@ -795,6 +795,156 @@ def dismiss_transcript(tid):
     return ("", 204)
 
 
+# Defaults / caps for the chunked-read endpoint. Picked so a single MCP
+# call comfortably fits in a small-context tool window: ~4 KB of text
+# per page, or ~50 segments of words+timing JSON. Hard caps prevent a
+# malicious client from forcing the server to materialize the whole
+# transcript in one shot just by passing a huge ``?limit=``.
+_CHUNK_TEXT_DEFAULT_LIMIT = 4000
+_CHUNK_TEXT_MAX_LIMIT     = 64000
+_CHUNK_JSON_DEFAULT_LIMIT = 50
+_CHUNK_JSON_MAX_LIMIT     = 500
+
+
+def _resolve_transcript_artifact(tid, fmt):
+    """Shared lookup for the export + chunk endpoints.
+
+    Returns ``(path, parent, error_response)``. On error one of the
+    first two is None and ``error_response`` is the ready-to-return
+    ``(json_body, status)`` tuple. Keeps the error-shape contract
+    identical between ``export.<fmt>`` and ``chunk`` so MCP/CLI
+    callers can swap one for the other without retraining their
+    error parsers.
+    """
+    if fmt not in {"txt", "srt", "vtt", "json"}:
+        return None, None, (jsonify({"error": "invalid_format"}), 404)
+    tj = _tm().get(tid)
+    if tj is None or tj.status != transcribe_jobs.TranscribeStatus.DONE:
+        return None, None, (jsonify({"error": "transcript_not_found_or_not_done"}), 404)
+    parent = _jm().get(tj.parent_job_id)
+    if parent is None or not parent.file_path:
+        return None, None, (jsonify({"error": "parent_job_missing"}), 404)
+    base = os.path.splitext(parent.file_path)[0]
+    suffix = ".words.json" if fmt == "json" else ("." + fmt)
+    path = base + suffix
+    if not os.path.exists(path):
+        return None, None, (jsonify({"error": "artifact_not_on_disk"}), 404)
+    return path, parent, None
+
+
+@api_v1_bp.get("/transcripts/<tid>/chunk")
+@token_or_sig_required(SCOPE_TRANSCRIPT_EXPORT, kwarg="tid")
+def chunk_transcript(tid):
+    """Paginated read of a finished transcript — designed for MCP / LLM
+    callers whose context window can't hold a full hour-long transcript.
+
+    Query string:
+      - ``format`` — ``txt|srt|vtt|json`` (default ``txt``)
+      - ``offset`` — start position. For text formats this is a *byte*
+        offset into the on-disk rendered artifact (matches the bytes
+        ``/export.<fmt>`` would serve); for ``json`` it's a *segment*
+        index into ``data["segments"]``.
+      - ``limit``  — max units to return. Defaults / caps differ by
+        format (see module-level ``_CHUNK_*`` constants). ``0`` is
+        treated as "use the server default" rather than "return zero
+        units" — the latter would deadlock a naive paginator.
+
+    Always returns a JSON envelope with the same top-level keys
+    (``format / offset / limit / returned / total / has_more``) plus
+    one of ``content`` (text formats) or ``segments`` + ``words``
+    (json). ``content`` is a *substring*, not a clean line break, so
+    the caller can stitch chunks back together verbatim.
+    """
+    fmt = (request.args.get("format") or "txt").lower()
+    path, _parent, err = _resolve_transcript_artifact(tid, fmt)
+    if err is not None:
+        return err
+
+    try:
+        offset = max(0, int(request.args.get("offset") or 0))
+    except ValueError:
+        return jsonify({"error": "invalid_offset"}), 400
+    raw_limit = request.args.get("limit")
+    try:
+        limit = int(raw_limit) if raw_limit is not None else None
+    except ValueError:
+        return jsonify({"error": "invalid_limit"}), 400
+    if limit is not None and limit < 0:
+        return jsonify({"error": "invalid_limit"}), 400
+    # ``limit=0`` is treated as "server default" rather than "return
+    # zero units". Returning zero with ``has_more=True`` would put a
+    # naive client into an infinite pagination loop (offset never
+    # advances), so we collapse 0 to None and let the per-format
+    # default kick in below.
+    if limit == 0:
+        limit = None
+
+    if fmt == "json":
+        # Segment-range slicing. Loading the whole .words.json is fine
+        # — even an hour-long transcript is well under a megabyte and
+        # transcript_io.load() handles v1->v2 migration for free.
+        data = transcript_io.load(path)
+        segments = list(data.get("segments") or [])
+        all_words = list(data.get("words") or [])
+        total = len(segments)
+        if limit is None:
+            limit = _CHUNK_JSON_DEFAULT_LIMIT
+        limit = min(limit, _CHUNK_JSON_MAX_LIMIT)
+        slice_segs = segments[offset : offset + limit]
+        # Filter words to only those referenced by the returned
+        # segments — this is the whole point of the endpoint, otherwise
+        # a 1-segment chunk would still drag every word along with it.
+        wanted: set[int] = set()
+        for seg in slice_segs:
+            for wi in seg.get("word_idxs") or []:
+                if isinstance(wi, int):
+                    wanted.add(wi)
+        words_subset = [w for w in all_words
+                        if isinstance(w.get("idx"), int) and w["idx"] in wanted]
+        return jsonify({
+            "format":         "json",
+            "offset":         offset,
+            "limit":          limit,
+            "returned":       len(slice_segs),
+            "total":          total,
+            "has_more":       (offset + len(slice_segs)) < total,
+            "schema_version": data.get("schema_version"),
+            "language":       data.get("language"),
+            "duration":       data.get("duration"),
+            "segments":       slice_segs,
+            "words":          words_subset,
+            "total_words":    len(all_words),
+        })
+
+    # txt / srt / vtt — *byte*-range slicing of the on-disk rendered
+    # body. Read in binary so the wire bytes match what the
+    # /export.<fmt> endpoint serves verbatim (no CRLF→LF translation,
+    # no BOM eating). offset / total / returned are all byte counts so
+    # a client looping on ``offset += returned`` until ``has_more`` is
+    # false reproduces the export bytes exactly. The trailing chunk's
+    # bytes are decoded as utf-8 for JSON transport with
+    # ``errors="replace"`` so a split mid-codepoint never raises —
+    # callers that need true byte-fidelity should hit /export.<fmt>.
+    with open(path, "rb") as f:
+        body = f.read()
+    total = len(body)
+    if limit is None:
+        limit = _CHUNK_TEXT_DEFAULT_LIMIT
+    limit = min(limit, _CHUNK_TEXT_MAX_LIMIT)
+    end = min(offset + limit, total)
+    raw_chunk = body[offset:end] if offset < total else b""
+    chunk = raw_chunk.decode("utf-8", errors="replace")
+    return jsonify({
+        "format":   fmt,
+        "offset":   offset,
+        "limit":    limit,
+        "returned": len(raw_chunk),  # bytes, matches offset semantics
+        "total":    total,           # bytes
+        "has_more": end < total,
+        "content":  chunk,
+    })
+
+
 @api_v1_bp.get("/transcripts/<tid>/export.<fmt>")
 @token_or_sig_required(SCOPE_TRANSCRIPT_EXPORT, kwarg="tid")
 def export_transcript(tid, fmt):
@@ -804,21 +954,11 @@ def export_transcript(tid, fmt):
     of truth — useful for programmatic post-processing). ``txt|srt|
     vtt`` return the rendered artifacts.
     """
-    # JSON 404s (not Flask's HTML default) so CLI/MCP callers get a
-    # parseable error body instead of an HTML page.
-    if fmt not in {"txt", "srt", "vtt", "json"}:
-        return jsonify({"error": "invalid_format"}), 404
-    tj = _tm().get(tid)
-    if tj is None or tj.status != transcribe_jobs.TranscribeStatus.DONE:
-        return jsonify({"error": "transcript_not_found_or_not_done"}), 404
-    parent = _jm().get(tj.parent_job_id)
-    if parent is None or not parent.file_path:
-        return jsonify({"error": "parent_job_missing"}), 404
-    base = os.path.splitext(parent.file_path)[0]
-    suffix = ".words.json" if fmt == "json" else ("." + fmt)
-    path = base + suffix
-    if not os.path.exists(path):
-        return jsonify({"error": "artifact_not_on_disk"}), 404
+    # Single-sourced lookup so /chunk and /export.<fmt> can never
+    # drift on auth scope, error codes, or artifact path resolution.
+    path, parent, err = _resolve_transcript_artifact(tid, fmt)
+    if err is not None:
+        return err
     mime = {
         "txt": "text/plain; charset=utf-8",
         "srt": "application/x-subrip",
@@ -1064,6 +1204,18 @@ _OPENAPI_DOC = {
         "/transcripts/{tid}/cancel":    {"post": {"summary": "Cancel a transcribe"}},
         "/transcripts/{tid}/dismiss":   {"post": {"summary": "Drop a finished transcribe"}},
         "/transcripts/{tid}/export.{fmt}": {"get": {"summary": "Export txt/srt/vtt/json"}},
+        "/transcripts/{tid}/chunk": {"get": {
+            "summary": "Paginated read of a transcript (for MCP / context-bounded clients)",
+            "parameters": [
+                {"name": "format", "in": "query",
+                 "schema": {"type": "string", "enum": ["txt", "srt", "vtt", "json"], "default": "txt"}},
+                {"name": "offset", "in": "query",
+                 "schema": {"type": "integer", "default": 0},
+                 "description": "Char offset for text formats; segment index for json."},
+                {"name": "limit",  "in": "query",
+                 "schema": {"type": "integer"},
+                 "description": "Defaults: 4000 chars (txt/srt/vtt) or 50 segments (json). Capped at 64000 / 500."},
+            ]}},
         "/storage":            {"get":  {"summary": "Disk-usage report"}},
         "/openapi.json":       {"get":  {"summary": "This document"}},
         "/events":             {"get":  {"summary": "Server-Sent Events stream of jobs+transcripts",

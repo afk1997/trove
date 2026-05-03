@@ -133,7 +133,7 @@ def test_mcp_end_to_end(tmp_path):
         "dismiss_download",
         "list_transcripts", "search_transcripts",
         "get_transcript_status", "transcribe",
-        "cancel_transcribe", "get_transcript",
+        "cancel_transcribe", "get_transcript", "get_transcript_chunk",
         "list_models", "install_model", "model_install_progress",
         "set_active_model", "remove_model",
         "storage_info",

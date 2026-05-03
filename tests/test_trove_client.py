@@ -168,6 +168,29 @@ def test_export_transcript_rejects_unknown_format(monkeypatch):
         TroveClient().export_transcript("tid", "pdf")
 
 
+def test_get_transcript_chunk_builds_url_with_defaults(captured, monkeypatch):
+    """Bare call sends only ``?format=`` so the server applies its
+    own defaults — no client-side guess at the page size."""
+    monkeypatch.setenv("TROVE_URL", "http://x")
+    TroveClient().get_transcript_chunk("tid")
+    assert captured[0]["url"] == "http://x/api/v1/transcripts/tid/chunk?format=txt"
+
+
+def test_get_transcript_chunk_includes_offset_and_limit(captured, monkeypatch):
+    monkeypatch.setenv("TROVE_URL", "http://x")
+    TroveClient().get_transcript_chunk("tid", "json", offset=5, limit=10)
+    assert captured[0]["url"] == (
+        "http://x/api/v1/transcripts/tid/chunk?format=json&offset=5&limit=10"
+    )
+
+
+def test_get_transcript_chunk_rejects_unknown_format(monkeypatch):
+    """Mirror of export_transcript: bad format raises before HTTP."""
+    monkeypatch.setenv("TROVE_URL", "http://x")
+    with pytest.raises(ValueError):
+        TroveClient().get_transcript_chunk("tid", "pdf")
+
+
 def test_204_response_returns_none(monkeypatch):
     """Non-content responses (job actions like /pause /cancel) must
     yield ``None`` rather than blow up on JSON-decoding empty bytes."""

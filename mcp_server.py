@@ -251,6 +251,41 @@ def _build_server():
         return _safe(lambda: _client.cancel_transcribe(transcript_id))
 
     @mcp.tool()
+    def get_transcript_chunk(transcript_id: str, format: str = "txt",
+                             offset: int = 0, limit: int = 0) -> dict:
+        """Read a slice of a finished transcript (paginated).
+
+        Designed for context-bounded LLM callers: a 90-minute podcast
+        transcript easily exceeds the per-tool reply budget, so this
+        returns one page at a time and the agent stitches them.
+
+        Args:
+            transcript_id: The transcript id from ``list_transcripts``.
+            format: ``txt|srt|vtt`` slice by *byte* offset (matches the
+                bytes the export endpoint would serve); ``json`` slices
+                by *segment* index over the v2 schema.
+            offset: Where to start the page (byte or segment index per
+                ``format``). 0 starts from the beginning.
+            limit: Page size. ``0`` (the default) lets the server pick:
+                4000 bytes for text, 50 segments for json. Capped at
+                64000 bytes / 500 segments server-side.
+
+        Returns:
+            ``{format, offset, limit, returned, total, has_more, ...}``
+            with ``content`` for text formats or ``segments`` + ``words``
+            (filtered to those referenced by the returned segments) for
+            ``json``. Loop while ``has_more`` is true, advancing
+            ``offset`` by ``returned`` each call.
+        """
+        if format not in {"txt", "srt", "vtt", "json"}:
+            return {"error": "format must be txt|srt|vtt|json"}
+        kw = {"offset": offset}
+        if limit:
+            kw["limit"] = limit
+        return _safe(lambda: _client.get_transcript_chunk(
+            transcript_id, format, **kw))
+
+    @mcp.tool()
     def get_transcript(transcript_id: str, format: str = "txt") -> dict:
         """Fetch a finished transcript.
 
