@@ -16,6 +16,7 @@ expose new endpoints without re-implementing the work-thunk logic that
 from __future__ import annotations
 
 import os
+import time
 from threading import Lock, Thread
 
 from flask import Blueprint, current_app, jsonify, request, send_file
@@ -40,9 +41,59 @@ _install_lock = Lock()
 
 
 # ----- view helpers ---------------------------------------------------
+# These shape the JSON payload returned to the CLI / MCP server. We
+# include both raw machine-friendly fields (bytes, seconds, ratios) and
+# a ``human`` block with pre-formatted strings ("12.4 MB", "2:31",
+# "5.2 MB/s") so a coding agent can surface progress directly to the
+# user without re-implementing formatting on every client.
+
+def _human_bytes(n: int | float | None) -> str:
+    if not n or n <= 0:
+        return "—"
+    n = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024:
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} PB"
+
+
+def _human_duration(seconds: float | int | None) -> str:
+    """Format seconds as ``H:MM:SS`` (or ``M:SS`` under an hour)."""
+    if seconds is None or seconds < 0:
+        return "—"
+    s = int(seconds)
+    if s < 3600:
+        return f"{s // 60}:{s % 60:02d}"
+    return f"{s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+
+
+def _human_speed(bps: float | int | None) -> str:
+    if not bps or bps <= 0:
+        return "—"
+    return f"{_human_bytes(bps)}/s"
+
+
+def _download_pct(job) -> int:
+    """Best-effort percent complete for a download. Prefers byte ratio,
+    falls back to fragment ratio (HLS / DASH), 100 when terminal."""
+    try:
+        from jobs import JobStatus
+        if job.status == JobStatus.DONE:
+            return 100
+    except Exception:
+        pass
+    if job.total_bytes:
+        return min(100, int(job.downloaded_bytes / job.total_bytes * 100))
+    if job.fragment_count:
+        return min(100, int(job.fragment_index / job.fragment_count * 100))
+    return 0
+
 
 def _job_view(job) -> dict:
-    return {
+    elapsed = max(0.0, time.monotonic() - job.created_at)
+    pct = _download_pct(job)
+    out = {
         "id": job.id,
         "url": job.url,
         "title": job.title,
@@ -50,20 +101,59 @@ def _job_view(job) -> dict:
         "filename": job.filename,
         "thumbnail": job.thumbnail or None,
         "format_choice": job.format_choice,
+        # Raw machine-readable progress
         "downloaded_bytes": job.downloaded_bytes,
         "total_bytes": job.total_bytes,
         "speed_bps": job.speed,
         "eta_seconds": job.eta,
         "fragment_index": job.fragment_index,
         "fragment_count": job.fragment_count,
+        "progress_pct": pct,
+        "elapsed_seconds": round(elapsed, 1),
         "auto_transcribe": job.auto_transcribe,
         "error_category": job.error_category,
         "error_message": job.error_message,
     }
+    # Pre-formatted strings for direct display by the agent / CLI.
+    out["human"] = {
+        "progress": f"{pct}%",
+        "downloaded": _human_bytes(job.downloaded_bytes),
+        "size": _human_bytes(job.total_bytes),
+        "speed": _human_speed(job.speed),
+        "eta": _human_duration(job.eta) if job.eta else "—",
+        "elapsed": _human_duration(elapsed),
+        # One-liner you can drop straight into a chat: e.g.
+        # "downloading · 42% · 12.4 MB / 29.7 MB · 5.2 MB/s · ETA 0:03"
+        "summary": _summarize_job(job, pct, elapsed),
+    }
+    return out
+
+
+def _summarize_job(job, pct: int, elapsed: float) -> str:
+    bits = [job.status.value]
+    if job.status.value in ("downloading", "queued"):
+        bits.append(f"{pct}%")
+        if job.total_bytes:
+            bits.append(f"{_human_bytes(job.downloaded_bytes)} / "
+                        f"{_human_bytes(job.total_bytes)}")
+        elif job.downloaded_bytes:
+            bits.append(_human_bytes(job.downloaded_bytes))
+        if job.speed:
+            bits.append(_human_speed(job.speed))
+        if job.eta:
+            bits.append(f"ETA {_human_duration(job.eta)}")
+    elif job.status.value == "done":
+        if job.total_bytes:
+            bits.append(_human_bytes(job.total_bytes))
+        bits.append(f"in {_human_duration(elapsed)}")
+    elif job.status.value == "error" and job.error_message:
+        bits.append(f"— {job.error_message}")
+    return " · ".join(bits)
 
 
 def _tj_view(tj) -> dict:
-    return {
+    elapsed = max(0.0, time.monotonic() - tj.started_at)
+    out = {
         "id": tj.id,
         "parent_job_id": tj.parent_job_id,
         "status": tj.status.value,
@@ -71,9 +161,36 @@ def _tj_view(tj) -> dict:
         "progress_pct": tj.progress_pct,
         "duration_seconds": tj.duration_seconds,
         "language_detected": tj.language_detected,
+        "elapsed_seconds": round(elapsed, 1),
         "error_category": tj.error_category,
         "error_message": tj.error_message,
     }
+    out["human"] = {
+        "progress": f"{tj.progress_pct}%",
+        "elapsed": _human_duration(elapsed),
+        "audio_duration": _human_duration(tj.duration_seconds)
+            if tj.duration_seconds else "—",
+        "summary": _summarize_tj(tj, elapsed),
+    }
+    return out
+
+
+def _summarize_tj(tj, elapsed: float) -> str:
+    bits = [tj.status.value]
+    if tj.status.value == "running":
+        bits.append(f"{tj.progress_pct}%")
+        if tj.duration_seconds:
+            bits.append(f"of {_human_duration(tj.duration_seconds)} audio")
+        bits.append(f"elapsed {_human_duration(elapsed)}")
+        if tj.model_used:
+            bits.append(f"model={tj.model_used}")
+    elif tj.status.value == "done":
+        bits.append(f"in {_human_duration(elapsed)}")
+        if tj.language_detected:
+            bits.append(f"lang={tj.language_detected}")
+    elif tj.status.value == "error" and tj.error_message:
+        bits.append(f"— {tj.error_message}")
+    return " · ".join(bits)
 
 
 def _jm():

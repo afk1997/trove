@@ -258,6 +258,67 @@ def test_install_progress_endpoint(client):
     assert "downloading" in body
 
 
+# ---- progress / human fields ---------------------------------------
+
+def test_job_view_includes_human_progress(client, monkeypatch):
+    """The MCP / CLI clients rely on a ``human`` block + computed
+    ``progress_pct`` / ``elapsed_seconds`` so they can give a useful
+    live status without re-implementing formatting on every poll."""
+    app, c = client
+    jm = app.extensions["trove.jobs"]
+    from jobs import Job
+    job = Job(
+        id="hview1", url="https://example.com/v", title="Big sample",
+        status=JobStatus.DOWNLOADING,
+        downloaded_bytes=12_400_000, total_bytes=29_700_000,
+        speed=5_200_000.0, eta=3,
+    )
+    with jm._lock:
+        jm._jobs["hview1"] = job
+
+    r = c.get(f"/api/v1/jobs/{job.id}")
+    assert r.status_code == 200
+    body = r.get_json()
+    # Raw machine-readable fields
+    assert body["progress_pct"] == 41
+    assert body["elapsed_seconds"] >= 0
+    assert body["speed_bps"] == 5_200_000.0
+    # Human-readable block
+    h = body["human"]
+    assert h["progress"] == "41%"
+    assert h["downloaded"] == "11.8 MB"  # 12.4M binary
+    assert h["size"] == "28.3 MB"        # 29.7M binary
+    assert h["speed"] == "5.0 MB/s"
+    assert h["eta"] == "0:03"
+    assert "downloading" in h["summary"]
+    assert "41%" in h["summary"]
+    assert "5.0 MB/s" in h["summary"]
+
+
+def test_transcript_view_includes_human_progress(client):
+    app, c = client
+    tm = app.extensions["trove.transcribe"]
+    tj = transcribe_jobs.TranscribeJob(
+        id="t1", parent_job_id="p1", model_used="ggml-tiny.bin",
+        progress_pct=42, duration_seconds=552.0, language_detected="en",
+        status=transcribe_jobs.TranscribeStatus.RUNNING,
+    )
+    with tm._lock:
+        tm._jobs["t1"] = tj
+    r = c.get("/api/v1/transcripts/t1")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["progress_pct"] == 42
+    assert body["duration_seconds"] == 552.0
+    assert body["elapsed_seconds"] >= 0
+    h = body["human"]
+    assert h["progress"] == "42%"
+    assert h["audio_duration"] == "9:12"
+    assert "running" in h["summary"]
+    assert "42%" in h["summary"]
+    assert "ggml-tiny.bin" in h["summary"]
+
+
 # ---- rate-limit exemption scope ------------------------------------
 
 def _swap_rate_limiter(app, rate=2, window=60):

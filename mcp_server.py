@@ -78,7 +78,21 @@ def _build_server():
 
     @mcp.tool()
     def get_job(job_id: str) -> dict:
-        """Get the current state of one download job."""
+        """Get the current state of one download job.
+
+        Returns rich progress data so you can give the user a useful
+        live update on every poll:
+
+        - ``status``: queued / downloading / paused / done / error / cancelled
+        - ``progress_pct`` (0-100), ``downloaded_bytes``, ``total_bytes``
+        - ``speed_bps`` (bytes/sec), ``eta_seconds``, ``elapsed_seconds``
+        - ``fragment_index`` / ``fragment_count`` for HLS/DASH streams
+        - ``human``: pre-formatted strings — ``progress`` (``"42%"``),
+          ``downloaded`` (``"12.4 MB"``), ``size``, ``speed``
+          (``"5.2 MB/s"``), ``eta`` (``"0:03"``), ``elapsed``, plus a
+          ``summary`` one-liner you can paste straight into a reply
+          (e.g. ``"downloading · 42% · 12.4 MB / 29.7 MB · 5.2 MB/s · ETA 0:03"``).
+        """
         return _safe(lambda: get(f"/api/v1/jobs/{job_id}"))
 
     @mcp.tool()
@@ -133,7 +147,16 @@ def _build_server():
 
     @mcp.tool()
     def get_transcript_status(transcript_id: str) -> dict:
-        """Get the lifecycle state of one transcribe job."""
+        """Get the lifecycle state + progress of one transcribe job.
+
+        Returns: ``status`` (queued/running/done/error/cancelled),
+        ``progress_pct``, ``elapsed_seconds``, ``duration_seconds``
+        (length of the source audio), ``language_detected``,
+        ``model_used``, plus a ``human`` block with pre-formatted
+        ``progress``, ``elapsed``, ``audio_duration`` and a
+        ``summary`` one-liner (e.g. ``"running · 42% · of 9:12 audio
+        · elapsed 1:08 · model=ggml-tiny.bin"``).
+        """
         return _safe(lambda: get(f"/api/v1/transcripts/{transcript_id}"))
 
     @mcp.tool()
