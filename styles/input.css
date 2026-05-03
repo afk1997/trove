@@ -61,7 +61,13 @@
       repeating-radial-gradient(circle at 0 0, var(--halftone) 0 0.8px, transparent 0.8px 6px);
     pointer-events: none;
     mix-blend-mode: multiply;
-    z-index: 100;
+    /* Sits above the cream page background but BELOW all sticky chrome
+       (.t-doc-header z:30, .t-doc-toolbar z:28, .t-player-bar z:27),
+       floating UI (.t-video-rail z:40, .t-jump-current z:45,
+       .t-context-menu z:60, .t-toast-stack z:80), and modals (z:1000).
+       Previously z:100 which visually multiplied the dot texture onto
+       every sticky bar as the user scrolled. */
+    z-index: 1;
   }
 
   ::selection { background: var(--orange); color: var(--light); }
