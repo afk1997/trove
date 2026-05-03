@@ -13,3 +13,4 @@ psutil>=5.9
 resemblyzer>=0.1.4
 silero-vad>=5.1
 scikit-learn>=1.3
+mcp>=1.0

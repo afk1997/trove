@@ -21,6 +21,18 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# MCP server is optional — only needed if the user wants to expose
+# Trove to a coding agent (Claude Desktop / Cursor / Replit Agent).
+# The CLI itself is stdlib-only.
+mcp = ["mcp>=1.0.0"]
+
+[project.scripts]
+# `trove` — CLI client over the JSON v1 API. Stdlib only.
+# `trove-mcp` — MCP (Model Context Protocol) server over stdio.
+# Both expect a Trove HTTP server reachable at $TROVE_URL
+# (default http://127.0.0.1:5000); start it with `trove serve`.
+trove = "cli:main"
+trove-mcp = "mcp_server:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

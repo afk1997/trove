@@ -75,6 +75,8 @@ def create_app() -> Flask:
 
     # Register split-out blueprints. See routes/__init__.py for why.
     app.register_blueprint(transcript_editor_bp)
+    from routes.api_v1 import api_v1_bp
+    app.register_blueprint(api_v1_bp)
 
     # Sweeper has to start AFTER both managers exist because the
     # keep_predicate references transcribe_manager — without it the
@@ -126,6 +128,24 @@ def create_app() -> Flask:
         # to a specific id format.
         if path.startswith("/api/transcribe/") and path.endswith("/status"):
             return True
+        # Cheap v1 status/poll GETs that the CLI + MCP server hammer
+        # while waiting on a job. We deliberately do NOT exempt the
+        # whole /api/v1/* prefix — file streams (`/jobs/<id>/file`)
+        # and export downloads (`/transcripts/<id>/export.*`) are
+        # bandwidth-heavy and stay rate-limited so a token-less
+        # deployment isn't a free egress vector.
+        if path == "/api/v1/health":
+            return True
+        if path == "/api/v1/jobs" or path == "/api/v1/transcripts":
+            return True
+        if path == "/api/v1/models" or path == "/api/v1/models/install-progress":
+            return True
+        # /api/v1/jobs/<id> and /api/v1/transcripts/<id> — single-resource
+        # status reads. Match by prefix-and-no-slash-after-id so we don't
+        # accidentally exempt /jobs/<id>/file or /transcripts/<id>/export.*.
+        for prefix in ("/api/v1/jobs/", "/api/v1/transcripts/"):
+            if path.startswith(prefix) and "/" not in path[len(prefix):]:
+                return True
         return False
 
     @app.before_request
@@ -897,6 +917,87 @@ def create_app() -> Flask:
             if getattr(job, "_auto_transcribe_hint", None):
                 view["auto_transcribe_hint"] = job._auto_transcribe_hint
         return view
+
+    # --- v1 action helpers -----------------------------------------------
+    # The /api/v1 blueprint reaches into these via app.extensions so the
+    # CLI + MCP server don't need to duplicate the work-thunk construction
+    # that lives inside the legacy HTML endpoints. Same in-process state,
+    # same managers, same locks — just a JSON-shaped surface on top.
+
+    def _v1_resume_job(job_id: str) -> bool:
+        job = job_manager.get(job_id)
+        if job is None:
+            return False
+        url = job.url
+        format_choice = job.format_choice
+        format_id = job.format_id
+        title = job.title
+        thumbnail = job.thumbnail
+        out_template = job.out_template or str(DOWNLOAD_DIR / f"{job.id}.%(ext)s")
+
+        def _work(j: Job):
+            j.thumbnail = thumbnail
+            j.format_choice = format_choice
+            j.format_id = format_id
+            j.out_template = out_template
+
+            def _on_progress(downloaded, total, speed, eta, frag_idx, frag_count):
+                j.downloaded_bytes = downloaded
+                j.total_bytes = total
+                j.speed = speed
+                j.eta = eta
+                j.fragment_index = frag_idx
+                j.fragment_count = frag_count
+
+            def _register_proc(popen):
+                j.process = popen
+
+            result = run_download(
+                url=url,
+                out_template=out_template,
+                format_choice=format_choice,
+                format_id=format_id,
+                progress_cb=_on_progress,
+                register_process=_register_proc,
+                was_paused_check=lambda: j._was_paused,
+            )
+            if result.error_category:
+                if not j._was_paused:
+                    j.status = JobStatus.ERROR
+                    j.error_category = result.error_category
+                    j.error_message = result.error_raw
+                return
+            ext = os.path.splitext(result.file_path)[1] if result.file_path else ""
+            j.file_path = result.file_path
+            j.filename = sanitize_filename(title, ext)
+            _try_auto_transcribe(j)
+
+        return job_manager.resume(job_id, target=_work)
+
+    def _v1_start_transcribe(parent_job_id: str) -> str | None:
+        """Submit a transcribe for an already-downloaded clip. Returns
+        the transcribe id, or None if preconditions fail (the v1 route
+        guards parent-state and active-model presence before calling)."""
+        parent = job_manager.get(parent_job_id)
+        if parent is None or parent.status != JobStatus.DONE or not parent.file_path:
+            return None
+        model_path = models_store.get_active_path()
+        if model_path is None:
+            return None
+        media_path = parent.file_path
+        base_no_ext = os.path.splitext(media_path)[0]
+        wav_path = base_no_ext + ".wav"
+        return transcribe_manager.submit(
+            parent_job_id=parent_job_id,
+            model_path=str(model_path),
+            target=_build_transcribe_target(media_path, base_no_ext, wav_path),
+        )
+
+    app.extensions["trove.actions"] = {
+        "enqueue_download": _enqueue_download,
+        "resume_job": _v1_resume_job,
+        "start_transcribe": _v1_start_transcribe,
+    }
 
     return app
 
