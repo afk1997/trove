@@ -105,9 +105,34 @@ def create_app() -> Flask:
         keep_predicate=_has_active_or_done_transcribe,
     )
 
+    # Idempotent HTMX/JS status polls — exempted from the per-IP rate
+    # limit because they fire every 1-2s while a page is open and would
+    # otherwise blow the budget within ~30s, 429-ing every subsequent
+    # user action (e.g. clicking "pick this model" on the setup page).
+    # All exempt paths are read-only GETs that return HTML/JSON status.
+    _POLL_EXEMPT_PREFIXES = (
+        "/api/status/",
+        "/api/status-card/",
+        "/api/transcribe/setup-progress",
+    )
+
+    def _is_poll_exempt() -> bool:
+        if request.method != "GET":
+            return False
+        path = request.path
+        if any(path.startswith(p) for p in _POLL_EXEMPT_PREFIXES):
+            return True
+        # /api/transcribe/<id>/status — match on suffix to avoid pinning
+        # to a specific id format.
+        if path.startswith("/api/transcribe/") and path.endswith("/status"):
+            return True
+        return False
+
     @app.before_request
     def _rate_limit():
         if not request.path.startswith("/api/"):
+            return None
+        if _is_poll_exempt():
             return None
         ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
         if not rate_limiter.allow(ip):
