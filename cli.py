@@ -166,12 +166,12 @@ def cmd_fetch(args) -> int:
     if args.title:
         body["title"] = args.title
     job = post("/api/v1/jobs", body=body)
-    if args.json:
+    if getattr(args, "json", False):
         _print_json(job)
     else:
         print(f"queued {job['id']}: {job.get('title') or job['url']}")
     if args.wait:
-        return _wait_for_job(job["id"], json_out=args.json)
+        return _wait_for_job(job["id"], json_out=getattr(args, "json", False))
     return 0
 
 
@@ -207,7 +207,7 @@ def _wait_for_job(job_id: str, *, json_out: bool, poll: float = 2.0,
 
 def cmd_list(args) -> int:
     data = get("/api/v1/jobs")
-    if args.json:
+    if getattr(args, "json", False):
         _print_json(data)
         return 0
     jobs = data["jobs"]
@@ -225,18 +225,18 @@ def cmd_job_action(args, action: str) -> int:
     if out is None:
         print(f"{args.id}: {action}")
     else:
-        _print_json(out) if args.json else print(_format_job_row(out))
+        _print_json(out) if getattr(args, "json", False) else print(_format_job_row(out))
     return 0
 
 
 def cmd_transcribe(args) -> int:
     tj = post(f"/api/v1/jobs/{args.job_id}/transcribe")
-    if args.json:
+    if getattr(args, "json", False):
         _print_json(tj)
     else:
         print(f"transcribe {tj['id']} for parent {args.job_id}: {tj['status']}")
     if args.wait:
-        return _wait_for_transcript(tj["id"], json_out=args.json)
+        return _wait_for_transcript(tj["id"], json_out=getattr(args, "json", False))
     return 0
 
 
@@ -271,7 +271,7 @@ def _wait_for_transcript(tid: str, *, json_out: bool, poll: float = 2.0,
 
 def cmd_transcripts(args) -> int:
     data = get("/api/v1/transcripts")
-    if args.json:
+    if getattr(args, "json", False):
         _print_json(data)
         return 0
     ts = data["transcripts"]
@@ -302,7 +302,7 @@ def cmd_transcript(args) -> int:
 
 def cmd_models(args) -> int:
     data = get("/api/v1/models")
-    if args.json:
+    if getattr(args, "json", False):
         _print_json(data)
         return 0
     print(f"active: {data.get('active') or '(none)'}")
@@ -360,25 +360,37 @@ def cmd_model_remove(args) -> int:
 # ----- argparse wiring ------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
+    # `--json` lives on a parent parser so it works in EITHER position
+    # (`trove --json list` or `trove list --json`). Argparse otherwise
+    # only honours it in the position the flag is declared on.
+    json_parent = argparse.ArgumentParser(add_help=False)
+    # SUPPRESS so when --json appears at the parent level, the
+    # subparser's "default False" doesn't quietly stomp it. We read
+    # via `getattr(args, 'json', False)` everywhere instead.
+    json_parent.add_argument(
+        "--json", action="store_true",
+        default=argparse.SUPPRESS, help="emit raw JSON output",
+    )
+
     p = argparse.ArgumentParser(
         prog="trove",
+        parents=[json_parent],
         description="Trove media-downloader / transcript-editor CLI.",
     )
-    p.add_argument("--json", action="store_true", help="emit raw JSON output")
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
-    # serve
-    s = sub.add_parser("serve", help="run the Trove web/API server")
+    def _sub(name: str, **kw):
+        return sub.add_parser(name, parents=[json_parent], **kw)
+
+    s = _sub("serve", help="run the Trove web/API server")
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=5000)
     s.set_defaults(func=cmd_serve)
 
-    # health
-    s = sub.add_parser("health", help="check that a Trove server is reachable")
+    s = _sub("health", help="check that a Trove server is reachable")
     s.set_defaults(func=cmd_health)
 
-    # fetch
-    s = sub.add_parser("fetch", help="download a media URL")
+    s = _sub("fetch", help="download a media URL")
     s.add_argument("url")
     s.add_argument("--mp3", action="store_true", help="audio-only (mp3) instead of mp4")
     s.add_argument("--transcribe", action="store_true",
@@ -387,48 +399,44 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--wait", action="store_true", help="block until done/error")
     s.set_defaults(func=cmd_fetch)
 
-    # list
-    s = sub.add_parser("list", help="list all download jobs")
+    s = _sub("list", help="list all download jobs")
     s.set_defaults(func=cmd_list)
 
-    # job actions
     for action in ("pause", "resume", "cancel"):
-        s = sub.add_parser(action, help=f"{action} a download job by id")
+        s = _sub(action, help=f"{action} a download job by id")
         s.add_argument("id")
         s.set_defaults(func=lambda a, action=action: cmd_job_action(a, action))
-    s = sub.add_parser("rm", help="dismiss a terminal job + delete its file")
+    s = _sub("rm", help="dismiss a terminal job + delete its file")
     s.add_argument("id")
     s.set_defaults(func=lambda a: cmd_job_action(a, "dismiss"))
 
-    # transcribe
-    s = sub.add_parser("transcribe", help="kick off transcription of a downloaded clip")
+    s = _sub("transcribe", help="kick off transcription of a downloaded clip")
     s.add_argument("job_id")
     s.add_argument("--wait", action="store_true")
     s.set_defaults(func=cmd_transcribe)
 
-    s = sub.add_parser("transcripts", help="list all transcripts")
+    s = _sub("transcripts", help="list all transcripts")
     s.set_defaults(func=cmd_transcripts)
 
-    s = sub.add_parser("transcript", help="fetch / export a transcript")
+    s = _sub("transcript", help="fetch / export a transcript")
     s.add_argument("id")
     s.add_argument("-f", "--format", choices=("txt", "srt", "vtt", "json"), default="txt")
     s.add_argument("-o", "--output", help="write to a file instead of stdout")
     s.set_defaults(func=cmd_transcript)
 
-    # models
-    s = sub.add_parser("models", help="list whisper models")
+    s = _sub("models", help="list whisper models")
     s.set_defaults(func=cmd_models)
 
-    s = sub.add_parser("model-install", help="download + activate a model")
+    s = _sub("model-install", help="download + activate a model")
     s.add_argument("name", help="e.g. ggml-tiny.bin / ggml-base.bin")
     s.add_argument("--wait", action="store_true")
     s.set_defaults(func=cmd_model_install)
 
-    s = sub.add_parser("model-use", help="set the active model")
+    s = _sub("model-use", help="set the active model")
     s.add_argument("name")
     s.set_defaults(func=cmd_model_use)
 
-    s = sub.add_parser("model-rm", help="delete an installed model")
+    s = _sub("model-rm", help="delete an installed model")
     s.add_argument("name")
     s.set_defaults(func=cmd_model_remove)
 

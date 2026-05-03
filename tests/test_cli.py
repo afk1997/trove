@@ -13,6 +13,20 @@ import pytest
 import cli
 
 
+def test_json_flag_works_in_either_position():
+    """Regression: argparse only honours --json in the position it's
+    declared on. The fix uses parents=[json_parent] so it works as
+    both `trove --json health` and `trove health --json`."""
+    parser = cli.build_parser()
+    a = parser.parse_args(["--json", "health"])
+    b = parser.parse_args(["health", "--json"])
+    assert a.json is True and b.json is True
+    c = parser.parse_args(["fetch", "https://x", "--mp3", "--json"])
+    d = parser.parse_args(["--json", "fetch", "https://x", "--mp3"])
+    assert c.json is True and d.json is True
+    assert c.mp3 is True and d.mp3 is True
+
+
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch):
     monkeypatch.delenv("TROVE_TOKEN", raising=False)

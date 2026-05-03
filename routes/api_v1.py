@@ -18,7 +18,7 @@ from __future__ import annotations
 import os
 from threading import Lock, Thread
 
-from flask import Blueprint, abort, current_app, jsonify, request, send_file
+from flask import Blueprint, current_app, jsonify, request, send_file
 
 import models_store
 import transcribe_jobs
@@ -275,19 +275,21 @@ def export_transcript(tid, fmt):
     of truth — useful for programmatic post-processing). ``txt|srt|
     vtt`` return the rendered artifacts.
     """
+    # JSON 404s (not Flask's HTML default) so CLI/MCP callers get a
+    # parseable error body instead of an HTML page.
     if fmt not in {"txt", "srt", "vtt", "json"}:
-        return abort(404)
+        return jsonify({"error": "invalid_format"}), 404
     tj = _tm().get(tid)
     if tj is None or tj.status != transcribe_jobs.TranscribeStatus.DONE:
-        return abort(404)
+        return jsonify({"error": "transcript_not_found_or_not_done"}), 404
     parent = _jm().get(tj.parent_job_id)
     if parent is None or not parent.file_path:
-        return abort(404)
+        return jsonify({"error": "parent_job_missing"}), 404
     base = os.path.splitext(parent.file_path)[0]
     suffix = ".words.json" if fmt == "json" else ("." + fmt)
     path = base + suffix
     if not os.path.exists(path):
-        return abort(404)
+        return jsonify({"error": "artifact_not_on_disk"}), 404
     mime = {
         "txt": "text/plain; charset=utf-8",
         "srt": "application/x-subrip",
