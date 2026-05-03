@@ -25,8 +25,19 @@ from util import sanitize_filename, split_urls
 from routes.transcript_editor import bp as transcript_editor_bp
 
 
-DOWNLOAD_DIR = Path(__file__).parent / "downloads"
-DOWNLOAD_DIR.mkdir(exist_ok=True)
+def _resolve_download_dir() -> Path:
+    """Resolve the on-disk download root.
+
+    Read at create_app() time (NOT at import time) so tests that set
+    ``TROVE_DOWNLOAD_DIR`` per-fixture get isolated trees instead of
+    accidentally sharing the real ``./downloads`` directory.
+    """
+    return Path(os.environ.get("TROVE_DOWNLOAD_DIR")
+                or (Path(__file__).parent / "downloads"))
+
+
+DOWNLOAD_DIR = _resolve_download_dir()
+DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 JOB_TTL = int(os.environ.get("TROVE_JOB_TTL_SECONDS", "3600"))
 MAX_WORKERS = int(os.environ.get("TROVE_MAX_WORKERS", "4"))
@@ -49,12 +60,18 @@ def create_app() -> Flask:
     app.jinja_env.globals["sign_resource"] = sign_resource
 
     rate_limiter = RateLimiter(rate=RATE_LIMIT_PER_MIN, per_seconds=60)
+    # Prefer the module-level DOWNLOAD_DIR so existing tests can use
+    # ``monkeypatch.setattr(app, "DOWNLOAD_DIR", ...)``. Fall back to
+    # the env-var-aware resolver only if the module global was cleared.
+    download_dir = DOWNLOAD_DIR if DOWNLOAD_DIR is not None else _resolve_download_dir()
+    download_dir.mkdir(parents=True, exist_ok=True)
     job_manager = JobManager(
         max_workers=MAX_WORKERS,
         ttl_seconds=JOB_TTL,
-        store_path=DOWNLOAD_DIR / "jobs.json",
+        store_path=download_dir / "jobs.json",
     )
     app.extensions["trove.jobs"] = job_manager
+    app.extensions["trove.download_dir"] = download_dir
     # Expose the batch cap to templates so the hero form can render an
     # inline counter and pre-flight check that mirror the server limit.
     app.jinja_env.globals["BATCH_MAX_URLS"] = BATCH_MAX_URLS
@@ -62,7 +79,7 @@ def create_app() -> Flask:
 
     transcribe_manager = transcribe_jobs.TranscribeJobManager(
         max_workers=1,
-        store_path=DOWNLOAD_DIR / "transcribe_jobs.json",
+        store_path=download_dir / "transcribe_jobs.json",
     )
     app.extensions["trove.transcribe"] = transcribe_manager
 
@@ -140,6 +157,15 @@ def create_app() -> Flask:
             return True
         if path == "/api/v1/models" or path == "/api/v1/models/install-progress":
             return True
+        # New v1 read-only endpoints used by the CLI/MCP. All cheap +
+        # idempotent so they're safe to exempt from per-IP rate
+        # limiting (same reasoning as /jobs and /transcripts above).
+        if path in (
+            "/api/v1/storage",
+            "/api/v1/openapi.json",
+            "/api/v1/events",
+        ) or path.startswith("/api/v1/transcripts/search"):
+            return True
         # /api/v1/jobs/<id> and /api/v1/transcripts/<id> — single-resource
         # status reads. Match by prefix-and-no-slash-after-id so we don't
         # accidentally exempt /jobs/<id>/file or /transcripts/<id>/export.*.
@@ -152,12 +178,45 @@ def create_app() -> Flask:
     def _rate_limit():
         if not request.path.startswith("/api/"):
             return None
+        # Stash IP on g so the after-request hook can attach
+        # X-RateLimit-* headers without recomputing.
+        from flask import g as _g
+        ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
+        _g.trove_rl_ip = ip
         if _is_poll_exempt():
             return None
-        ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
         if not rate_limiter.allow(ip):
-            return jsonify({"error": "rate_limited"}), 429
+            remaining, retry_after = rate_limiter.remaining(ip)
+            resp = jsonify({"error": "rate_limited", "retry_after": round(retry_after, 1)})
+            resp.status_code = 429
+            resp.headers["X-RateLimit-Limit"] = str(rate_limiter.rate)
+            resp.headers["X-RateLimit-Remaining"] = "0"
+            resp.headers["X-RateLimit-Window"] = "60"
+            resp.headers["Retry-After"] = str(max(1, int(retry_after) + 1))
+            return resp
         return None
+
+    @app.after_request
+    def _rate_limit_headers(resp):
+        # Only attach to /api/* responses, and only when the
+        # before-request hook actually computed an IP for this request
+        # (i.e. skip static, WS, etc.).
+        from flask import g as _g
+        if not request.path.startswith("/api/"):
+            return resp
+        ip = getattr(_g, "trove_rl_ip", None)
+        if not ip:
+            return resp
+        try:
+            remaining, retry_after = rate_limiter.remaining(ip)
+        except Exception:
+            return resp
+        resp.headers["X-RateLimit-Limit"] = str(rate_limiter.rate)
+        resp.headers["X-RateLimit-Remaining"] = str(min(remaining, rate_limiter.rate))
+        resp.headers["X-RateLimit-Window"] = "60"
+        if retry_after > 0 and "Retry-After" not in resp.headers:
+            resp.headers["Retry-After"] = str(max(1, int(retry_after) + 1))
+        return resp
 
     @app.get("/")
     def index():

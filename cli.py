@@ -36,11 +36,13 @@ MCP_TO_CLI: dict[str, str] = {
     "list_jobs":               "list",
     "get_job":                 "get",
     "download_media":          "fetch",
+    "bulk_download":           "fetch",   # `trove fetch URL [URL...]` covers both
     "pause_download":          "pause",
     "resume_download":         "resume",
     "cancel_download":         "cancel",
     "dismiss_download":        "rm",
     "list_transcripts":        "transcripts",
+    "search_transcripts":      "search",
     "get_transcript_status":   "transcript-status",
     "transcribe":              "transcribe",
     "cancel_transcribe":       "transcribe-cancel",
@@ -50,6 +52,7 @@ MCP_TO_CLI: dict[str, str] = {
     "model_install_progress":  "model-progress",
     "set_active_model":        "model-use",
     "remove_model":            "model-rm",
+    "storage_info":            "du",
 }
 
 
@@ -211,21 +214,55 @@ def cmd_health(args) -> int:
 
 
 def cmd_fetch(args) -> int:
-    body = {
-        "url": args.url,
-        "format": "audio" if args.mp3 else "video",
-        "auto_transcribe": bool(args.transcribe),
-    }
+    """Submit one or more URLs.
+
+    Single URL  → POST /jobs (rich error mapping, can ``--wait``).
+    Multiple URLs → POST /jobs/bulk (per-URL pass/fail array).
+    """
+    fmt = "audio" if args.mp3 else "video"
+    auto_t = bool(args.transcribe)
+    json_out = getattr(args, "json", False)
+
+    urls = list(args.url)
+    if len(urls) == 1:
+        body = {"url": urls[0], "format": fmt, "auto_transcribe": auto_t}
+        if args.title:
+            body["title"] = args.title
+        job = post("/api/v1/jobs", body=body)
+        if json_out:
+            _print_json(job)
+        else:
+            print(f"queued {job['id']}: {job.get('title') or job['url']}")
+        if args.wait:
+            return _wait_for_job(job["id"], json_out=json_out)
+        return 0
+
+    # Bulk path. ``--title`` is intentionally ignored for bulk submits
+    # because we'd otherwise apply the same title to every URL — surely
+    # not what the caller meant.
     if args.title:
-        body["title"] = args.title
-    job = post("/api/v1/jobs", body=body)
-    if getattr(args, "json", False):
-        _print_json(job)
-    else:
-        print(f"queued {job['id']}: {job.get('title') or job['url']}")
+        print("trove: --title ignored for bulk submit", file=sys.stderr)
+    res = post("/api/v1/jobs/bulk", body={
+        "urls": urls, "format": fmt, "auto_transcribe": auto_t,
+    })
+    if json_out:
+        _print_json(res)
+        # Bulk wait isn't useful (which job to wait on?). Skip --wait.
+        return 0 if res["failed"] == 0 else 2
+    print(f"submitted {res['submitted']} ok, {res['failed']} failed")
+    for r in res["results"]:
+        if "id" in r:
+            print(f"  ok    {r['id']:<10}  {r['title']}")
+        else:
+            print(f"  fail  {r.get('error','?'):<20}  {r['url']}")
     if args.wait:
-        return _wait_for_job(job["id"], json_out=getattr(args, "json", False))
-    return 0
+        ok_ids = [r["id"] for r in res["results"] if "id" in r]
+        rc = 0
+        for jid in ok_ids:
+            sub_rc = _wait_for_job(jid, json_out=False)
+            rc = rc or sub_rc
+        return rc
+    return 0 if res["failed"] == 0 else 2
 
 
 def _wait_for_job(job_id: str, *, json_out: bool, poll: float = 2.0,
@@ -258,28 +295,56 @@ def _wait_for_job(job_id: str, *, json_out: bool, poll: float = 2.0,
     return 3
 
 
+def _list_query(args, *, key_field: str) -> str:
+    """Build a ``?status=&limit=&offset=&order=`` query string from
+    standard list-flag args."""
+    q: list[str] = []
+    if getattr(args, "status", None):
+        q.append("status=" + urllib.parse.quote(args.status))
+    if getattr(args, "limit", None):
+        q.append(f"limit={int(args.limit)}")
+    if getattr(args, "offset", None):
+        q.append(f"offset={int(args.offset)}")
+    if getattr(args, "order", None):
+        q.append(f"order={args.order}")
+    return ("?" + "&".join(q)) if q else ""
+
+
+def _print_list_table(items: list[dict], header: str, fmt) -> None:
+    if not items:
+        print("(none)")
+        return
+    print(header)
+    for it in items:
+        print(fmt(it))
+
+
 def cmd_list(args) -> int:
-    data = get("/api/v1/jobs")
-    if getattr(args, "json", False):
-        _print_json(data)
+    json_out = getattr(args, "json", False)
+    path = "/api/v1/jobs" + _list_query(args, key_field="jobs")
+
+    def _render(data: dict) -> None:
+        if json_out:
+            _print_json(data)
+            return
+        _print_list_table(
+            data["jobs"],
+            f"{'ID':<10}  {'STATUS':<11}     %       SPEED  TITLE",
+            _format_job_row,
+        )
+        if data.get("total", 0) > data.get("returned", 0):
+            print(f"  (showing {data['returned']} of {data['total']} — use --offset)")
+
+    if not getattr(args, "watch", False):
+        _render(get(path))
         return 0
-    jobs = data["jobs"]
-    if not jobs:
-        print("(no jobs)")
-        return 0
-    print(f"{'ID':<10}  {'STATUS':<11}     %       SPEED  TITLE")
-    for j in jobs:
-        print(_format_job_row(j))
-    return 0
+    return _watch_loop(lambda: get(path), _render)
 
 
-def cmd_get(args) -> int:
-    """Inspect a single download job — same fields the MCP `get_job`
-    tool surfaces (raw + ``human.summary``)."""
-    j = get(f"/api/v1/jobs/{args.id}")
-    if getattr(args, "json", False):
+def _render_job_card(j: dict, *, json_out: bool) -> None:
+    if json_out:
         _print_json(j)
-        return 0
+        return
     h = j.get("human") or {}
     print(f"{j['id']}  {j['status']}")
     print(f"  url:       {j['url']}")
@@ -291,7 +356,20 @@ def cmd_get(args) -> int:
         print(f"  file:      {j['filename']}")
     if j.get("error_message"):
         print(f"  error:     {j['error_category']} — {j['error_message']}")
-    return 0
+
+
+def cmd_get(args) -> int:
+    """Inspect a single download job — same fields the MCP `get_job`
+    tool surfaces (raw + ``human.summary``)."""
+    json_out = getattr(args, "json", False)
+    fetch = lambda: get(f"/api/v1/jobs/{args.id}")
+    render = lambda j: _render_job_card(j, json_out=json_out)
+    if not getattr(args, "watch", False):
+        render(fetch())
+        return 0
+    return _watch_loop(fetch, render,
+                       terminal_check=lambda j: j["status"]
+                       in ("done", "error", "cancelled"))
 
 
 def cmd_job_action(args, action: str) -> int:
@@ -344,26 +422,31 @@ def _wait_for_transcript(tid: str, *, json_out: bool, poll: float = 2.0,
 
 
 def cmd_transcripts(args) -> int:
-    data = get("/api/v1/transcripts")
-    if getattr(args, "json", False):
-        _print_json(data)
+    json_out = getattr(args, "json", False)
+    path = "/api/v1/transcripts" + _list_query(args, key_field="transcripts")
+
+    def _render(data: dict) -> None:
+        if json_out:
+            _print_json(data)
+            return
+        _print_list_table(
+            data["transcripts"],
+            f"{'ID':<10}  {'STATUS':<10}    %  ELAPSED  PARENT     MODEL",
+            _format_tj_row,
+        )
+        if data.get("total", 0) > data.get("returned", 0):
+            print(f"  (showing {data['returned']} of {data['total']} — use --offset)")
+
+    if not getattr(args, "watch", False):
+        _render(get(path))
         return 0
-    ts = data["transcripts"]
-    if not ts:
-        print("(no transcripts)")
-        return 0
-    print(f"{'ID':<10}  {'STATUS':<10}    %  ELAPSED  PARENT     MODEL")
-    for t in ts:
-        print(_format_tj_row(t))
-    return 0
+    return _watch_loop(lambda: get(path), _render)
 
 
-def cmd_transcript_status(args) -> int:
-    """Poll a single transcribe job (mirror of MCP `get_transcript_status`)."""
-    t = get(f"/api/v1/transcripts/{args.id}")
-    if getattr(args, "json", False):
+def _render_transcript_card(t: dict, *, json_out: bool) -> None:
+    if json_out:
         _print_json(t)
-        return 0
+        return
     h = t.get("human") or {}
     print(f"{t['id']}  {t['status']}")
     print(f"  parent:   {t['parent_job_id']}")
@@ -374,7 +457,52 @@ def cmd_transcript_status(args) -> int:
         print(f"  lang:     {t['language_detected']}")
     if t.get("error_message"):
         print(f"  error:    {t['error_category']} — {t['error_message']}")
-    return 0
+
+
+def cmd_transcript_status(args) -> int:
+    """Poll a single transcribe job (mirror of MCP `get_transcript_status`)."""
+    json_out = getattr(args, "json", False)
+    fetch = lambda: get(f"/api/v1/transcripts/{args.id}")
+    render = lambda t: _render_transcript_card(t, json_out=json_out)
+    if not getattr(args, "watch", False):
+        render(fetch())
+        return 0
+    return _watch_loop(fetch, render,
+                       terminal_check=lambda t: t["status"]
+                       in ("done", "error", "cancelled"))
+
+
+# ----- watch loop ----------------------------------------------------
+
+def _watch_loop(fetch, render, *,
+                terminal_check=None, interval: float = 1.0) -> int:
+    """Common ``--watch`` driver.
+
+    Re-runs ``fetch()`` every *interval* seconds, calls ``render()``
+    when the payload actually changes (so a calm queue doesn't redraw
+    forever), and exits cleanly on Ctrl-C. If ``terminal_check`` is
+    supplied and returns True, the loop exits with rc=0 (or 2 when
+    the resource ended in an error state).
+    """
+    last = object()
+    try:
+        while True:
+            data = fetch()
+            payload = json.dumps(data, sort_keys=True, default=str)
+            if payload != last:
+                # Soft "clear screen" — only when running in a TTY,
+                # otherwise we just pile output (useful for piping).
+                if sys.stdout.isatty():
+                    sys.stdout.write("\x1b[2J\x1b[H")
+                render(data)
+                sys.stdout.flush()
+                last = payload
+            if terminal_check and terminal_check(data):
+                status = data.get("status")
+                return 0 if status == "done" else (2 if status in ("error", "cancelled") else 0)
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        return 130
 
 
 def cmd_cancel_transcribe(args) -> int:
@@ -476,6 +604,113 @@ def cmd_model_remove(args) -> int:
     return 0
 
 
+def cmd_du(args) -> int:
+    """Disk-usage report — what's eating space in `downloads/`."""
+    rep = get("/api/v1/storage")
+    if getattr(args, "json", False):
+        _print_json(rep)
+        return 0
+    print(f"download_dir: {rep['download_dir']}")
+    print(f"total: {_human_bytes(rep['total_bytes'])} "
+          f"({rep['file_count']} files)")
+    if rep["by_job"]:
+        print()
+        print(f"{'ID':<10}  {'SIZE':>10}  TITLE")
+        for row in rep["by_job"]:
+            print(f"{row['id']:<10}  {_human_bytes(row['bytes']):>10}  "
+                  f"{(row['title'] or '')[:60]}")
+    if rep["orphan_files"]:
+        print()
+        print(f"orphans: {_human_bytes(rep['orphan_bytes'])} "
+              f"({len(rep['orphan_files'])} files)")
+        for f in rep["orphan_files"][:10]:
+            print(f"  {_human_bytes(f['bytes']):>10}  {f['name']}")
+    return 0
+
+
+def cmd_search(args) -> int:
+    """Substring-search across completed transcripts."""
+    qs = "?q=" + urllib.parse.quote(args.query)
+    if args.limit:
+        qs += f"&limit={int(args.limit)}"
+    if args.context is not None:
+        qs += f"&context={int(args.context)}"
+    res = get("/api/v1/transcripts/search" + qs)
+    if getattr(args, "json", False):
+        _print_json(res)
+        return 0
+    matches = res.get("matches") or []
+    if not matches:
+        print(f"(no matches for {args.query!r})")
+        return 1
+    for m in matches:
+        ts = _format_seconds(m["start_seconds"])
+        print(f"{m['transcript_id']:<10}  {ts}  {(m['title'] or '')[:40]}")
+        print(f"  {m['snippet']}")
+    print(f"\n{len(matches)} match{'es' if len(matches) != 1 else ''}")
+    return 0
+
+
+def _format_seconds(s: float) -> str:
+    s = int(s)
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
+
+
+def cmd_events(args) -> int:
+    """Tail the SSE event stream. Press Ctrl-C to stop."""
+    qs = []
+    if args.max_events:
+        qs.append(f"max_events={int(args.max_events)}")
+    if args.interval is not None:
+        qs.append(f"interval={float(args.interval)}")
+    path = "/api/v1/events" + (("?" + "&".join(qs)) if qs else "")
+    url = _base_url() + path
+    req = urllib.request.Request(url, headers=_headers())
+    json_out = getattr(args, "json", False)
+    try:
+        with urllib.request.urlopen(req, timeout=None) as resp:
+            buf = b""
+            for chunk in iter(lambda: resp.read(1024), b""):
+                buf += chunk
+                # SSE messages are separated by blank lines.
+                while b"\n\n" in buf:
+                    msg, buf = buf.split(b"\n\n", 1)
+                    payload = _parse_sse(msg.decode("utf-8", errors="replace"))
+                    if payload is None:
+                        continue
+                    if json_out:
+                        sys.stdout.write(json.dumps(payload) + "\n")
+                    else:
+                        ts = payload.get("ts", time.time())
+                        nj = len(payload.get("jobs") or [])
+                        nt = len(payload.get("transcripts") or [])
+                        print(f"[{time.strftime('%H:%M:%S', time.localtime(ts))}] "
+                              f"jobs={nj} transcripts={nt}")
+                    sys.stdout.flush()
+    except KeyboardInterrupt:
+        return 130
+    except urllib.error.URLError as e:
+        print(f"trove: events stream closed ({e.reason})", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _parse_sse(message: str) -> dict | None:
+    """Pull the JSON ``data:`` payload out of one SSE frame."""
+    data_lines = []
+    for line in message.splitlines():
+        if line.startswith("data:"):
+            data_lines.append(line[5:].lstrip())
+    if not data_lines:
+        return None
+    try:
+        return json.loads("\n".join(data_lines))
+    except ValueError:
+        return None
+
+
 # ----- argparse wiring ------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -509,20 +744,34 @@ def build_parser() -> argparse.ArgumentParser:
     s = _sub("health", help="check that a Trove server is reachable")
     s.set_defaults(func=cmd_health)
 
-    s = _sub("fetch", help="download a media URL")
-    s.add_argument("url")
+    s = _sub("fetch", help="download one or more media URLs")
+    s.add_argument("url", nargs="+",
+                   help="one or more URLs (multiple → bulk submit)")
     s.add_argument("--mp3", action="store_true", help="audio-only (mp3) instead of mp4")
     s.add_argument("--transcribe", action="store_true",
                    help="auto-transcribe on success (requires an active model)")
-    s.add_argument("--title", default=None, help="override the auto-detected title")
+    s.add_argument("--title", default=None,
+                   help="override the auto-detected title (single URL only)")
     s.add_argument("--wait", action="store_true", help="block until done/error")
     s.set_defaults(func=cmd_fetch)
 
-    s = _sub("list", help="list all download jobs")
+    def _add_list_flags(p):
+        p.add_argument("--status", default=None,
+                       help="comma-separated filter (e.g. done,error)")
+        p.add_argument("--limit", type=int, default=None)
+        p.add_argument("--offset", type=int, default=None)
+        p.add_argument("--order", choices=("newest", "oldest"), default=None)
+        p.add_argument("--watch", action="store_true",
+                       help="redraw on change until Ctrl-C")
+
+    s = _sub("list", help="list download jobs (paginated, filterable)")
+    _add_list_flags(s)
     s.set_defaults(func=cmd_list)
 
     s = _sub("get", help="inspect one download job (rich progress)")
     s.add_argument("id")
+    s.add_argument("--watch", action="store_true",
+                   help="redraw every second until terminal state")
     s.set_defaults(func=cmd_get)
 
     for action in ("pause", "resume", "cancel"):
@@ -538,12 +787,32 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--wait", action="store_true")
     s.set_defaults(func=cmd_transcribe)
 
-    s = _sub("transcripts", help="list all transcripts")
+    s = _sub("transcripts", help="list transcripts (paginated, filterable)")
+    _add_list_flags(s)
     s.set_defaults(func=cmd_transcripts)
 
     s = _sub("transcript-status", help="poll one transcribe job")
     s.add_argument("id")
+    s.add_argument("--watch", action="store_true",
+                   help="redraw every second until terminal state")
     s.set_defaults(func=cmd_transcript_status)
+
+    s = _sub("search", help="substring-search across completed transcripts")
+    s.add_argument("query")
+    s.add_argument("--limit", type=int, default=None)
+    s.add_argument("--context", type=int, default=None,
+                   help="characters of context around each match")
+    s.set_defaults(func=cmd_search)
+
+    s = _sub("du", help="disk-usage report for the download directory")
+    s.set_defaults(func=cmd_du)
+
+    s = _sub("events", help="tail the SSE event stream")
+    s.add_argument("--max-events", type=int, default=0,
+                   help="exit after N events (test hook; 0 = unbounded)")
+    s.add_argument("--interval", type=float, default=None,
+                   help="server-side poll interval, seconds")
+    s.set_defaults(func=cmd_events)
 
     s = _sub("transcribe-cancel", help="cancel an in-flight transcribe")
     s.add_argument("id")

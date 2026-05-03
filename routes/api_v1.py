@@ -15,19 +15,134 @@ expose new endpoints without re-implementing the work-thunk logic that
 """
 from __future__ import annotations
 
+import json
 import os
 import time
+from collections import OrderedDict
+from pathlib import Path
 from threading import Lock, Thread
 
-from flask import Blueprint, current_app, jsonify, request, send_file
+from flask import (
+    Blueprint, Response, current_app, jsonify, request, send_file,
+    stream_with_context,
+)
 
 import models_store
 import transcribe_jobs
+import transcript_io
 from jobs import JobStatus
 from safety import token_or_sig_required, token_required
 from util import sanitize_filename
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
+
+
+# ----- idempotency store ---------------------------------------------
+#
+# Clients (CLI, MCP, scripts) often retry POST /jobs after a network
+# blip. Without an idempotency key they'd silently double-submit and
+# the same URL would download twice. Spec mirrors Stripe's
+# Idempotency-Key header: caller supplies any opaque string (UUID
+# recommended), server returns the *same* job for the same key inside
+# the TTL window. In-memory only — self-hosted single-process server,
+# so a process restart wipes the cache, which is fine.
+_IDEMPOTENCY_TTL_SECONDS = 24 * 3600
+_IDEMPOTENCY_CAPACITY    = 512
+
+
+class _IdempotencyStore:
+    def __init__(self, ttl: int = _IDEMPOTENCY_TTL_SECONDS,
+                 capacity: int = _IDEMPOTENCY_CAPACITY):
+        self._ttl = ttl
+        self._cap = capacity
+        self._lock = Lock()
+        # OrderedDict so we can drop the oldest insert on overflow
+        # without scanning the whole map.
+        self._items: OrderedDict[str, tuple[str, float]] = OrderedDict()
+
+    def _sweep_locked(self, now: float) -> None:
+        # Cheap eager TTL sweep — bounded by capacity (≤512 entries).
+        dead = [k for k, (_, exp) in self._items.items() if exp <= now]
+        for k in dead:
+            del self._items[k]
+
+    def get(self, key: str) -> str | None:
+        if not key:
+            return None
+        now = time.monotonic()
+        with self._lock:
+            self._sweep_locked(now)
+            entry = self._items.get(key)
+            return entry[0] if entry else None
+
+    def put(self, key: str, job_id: str) -> None:
+        if not key:
+            return
+        now = time.monotonic()
+        with self._lock:
+            self._sweep_locked(now)
+            self._items[key] = (job_id, now + self._ttl)
+            self._items.move_to_end(key)
+            while len(self._items) > self._cap:
+                self._items.popitem(last=False)
+
+    def claim(self, key: str) -> tuple[str | None, bool]:
+        """Single-flight claim. Returns ``(prior_id, claimed)``.
+
+        - If the key already maps to a real job id, returns
+          ``(prior_id, False)`` — caller should replay.
+        - If the key is unknown, atomically inserts a sentinel
+          placeholder and returns ``(None, True)`` — caller owns the
+          enqueue and must call ``finalize()`` or ``release()``.
+        - If another request is mid-enqueue (placeholder present),
+          returns ``(None, False)`` and the caller must surface a
+          ``409 in_flight`` so the client retries after the first one
+          completes (rather than silently double-enqueuing).
+        """
+        if not key:
+            return None, True  # no idempotency requested → always proceed
+        now = time.monotonic()
+        with self._lock:
+            self._sweep_locked(now)
+            entry = self._items.get(key)
+            if entry is not None:
+                jid = entry[0]
+                if jid == _IN_FLIGHT:
+                    return None, False  # racing peer is still enqueuing
+                return jid, False
+            # Reserve the slot atomically so concurrent retries see it.
+            self._items[key] = (_IN_FLIGHT, now + self._ttl)
+            self._items.move_to_end(key)
+            while len(self._items) > self._cap:
+                self._items.popitem(last=False)
+            return None, True
+
+    def release(self, key: str) -> None:
+        """Drop a placeholder reservation (failed enqueue path)."""
+        if not key:
+            return
+        with self._lock:
+            entry = self._items.get(key)
+            if entry is not None and entry[0] == _IN_FLIGHT:
+                del self._items[key]
+
+    def delete(self, key: str) -> None:
+        """Unconditionally drop ``key`` (even a finalized job-id entry).
+
+        Used to recover the stale-key path: a prior idempotent POST
+        succeeded, but the job has since been TTL-swept / dismissed
+        from the JobManager. The mapping is dead; let the next caller
+        with the same key submit a fresh job."""
+        if not key:
+            return
+        with self._lock:
+            self._items.pop(key, None)
+
+
+_IN_FLIGHT = "__inflight__"
+
+
+_idempotency_store = _IdempotencyStore()
 
 
 # Single-flight model install (mirrors the setup-page flag). Lives at
@@ -205,6 +320,67 @@ def _actions():
     return current_app.extensions["trove.actions"]
 
 
+def _download_dir() -> Path:
+    return current_app.extensions["trove.download_dir"]
+
+
+# ----- pagination + filtering helpers --------------------------------
+
+def _parse_page_args() -> tuple[int, int, str, str | None]:
+    """Pull ``?limit=&offset=&order=&status=`` off the request, with
+    defensive clamping.
+
+    Back-compat: if the caller does NOT supply ``limit``, we return all
+    matching items (legacy behavior). Pre-pagination clients that just
+    called ``GET /jobs`` must keep getting the full list. A caller that
+    explicitly opts in to paging (``?limit=N``) is clamped to 1-500."""
+    raw_limit = request.args.get("limit")
+    if raw_limit is None:
+        limit = _UNLIMITED
+    else:
+        try:
+            limit = int(raw_limit)
+        except ValueError:
+            limit = 100
+        limit = max(1, min(500, limit))
+    try:
+        offset = int(request.args.get("offset", "0"))
+    except ValueError:
+        offset = 0
+    offset = max(0, offset)
+    order = request.args.get("order", "newest").lower()
+    if order not in ("newest", "oldest"):
+        order = "newest"
+    status = request.args.get("status")
+    return limit, offset, order, status
+
+
+# Sentinel meaning "no caller-supplied limit; return everything after
+# offset". Concrete int so downstream slice math doesn't need a branch.
+_UNLIMITED = 10 ** 9
+
+
+def _paginate(items: list, *, status: str | None, status_attr: str,
+              order: str, limit: int, offset: int) -> tuple[list, int]:
+    """Apply status filter + ordering + slice. Returns (page, total).
+
+    ``status_attr`` is the attribute path on each item (e.g. ``status``
+    on Job/TranscribeJob — both expose ``.status.value``).
+    """
+    if status:
+        wanted = {s.strip().lower() for s in status.split(",") if s.strip()}
+        items = [
+            it for it in items
+            if getattr(it, status_attr).value in wanted
+        ]
+    # JobManager stores in insertion order; reverse for "newest first".
+    if order == "newest":
+        items = list(reversed(items))
+    total = len(items)
+    page = items[offset : offset + limit]
+    return page, total
+
+
 # ----- meta -----------------------------------------------------------
 
 @api_v1_bp.get("/health")
@@ -219,7 +395,36 @@ def health():
 @api_v1_bp.get("/jobs")
 @token_required
 def list_jobs():
-    return jsonify({"jobs": [_job_view(j) for j in _jm().snapshot_jobs()]})
+    """List download jobs.
+
+    Query params (all optional):
+      * ``status``: comma-separated filter (e.g. ``done,error``).
+      * ``limit``: 1-500, default 100.
+      * ``offset``: pagination cursor (0-based).
+      * ``order``: ``newest`` (default) or ``oldest``.
+
+    Returns ``{jobs, total, returned, limit, offset}`` so the caller
+    can show "showing 20 of 137" and page without re-counting.
+    """
+    limit, offset, order, status = _parse_page_args()
+    page, total = _paginate(
+        _jm().snapshot_jobs(),
+        status=status, status_attr="status",
+        order=order, limit=limit, offset=offset,
+    )
+    return jsonify({
+        "jobs": [_job_view(j) for j in page],
+        "total": total, "returned": len(page),
+        "limit": _surface_limit(limit, len(page)), "offset": offset,
+    })
+
+
+def _surface_limit(limit: int, returned: int) -> int:
+    """Hide the internal _UNLIMITED sentinel from JSON callers — surface
+    the actual page size when the caller asked for "everything"."""
+    if limit >= _UNLIMITED:
+        return returned
+    return limit
 
 
 @api_v1_bp.get("/jobs/<job_id>")
@@ -231,38 +436,29 @@ def get_job(job_id):
     return jsonify(_job_view(job))
 
 
-@api_v1_bp.post("/jobs")
-@token_required
-def submit_job():
-    """Enqueue a new download. Body: ``{url, format?, format_id?, title?, auto_transcribe?}``.
+def _submit_one(url: str, *, format_choice: str = "video",
+                format_id: str | None = None, title: str = "",
+                thumbnail: str = "", auto_transcribe: bool = False
+                ) -> tuple[dict | None, dict | None]:
+    """Shared download-submission core used by both the single-URL
+    POST /jobs path and the bulk POST /jobs/bulk path.
 
-    ``format`` defaults to ``"video"`` (mp4); pass ``"audio"`` for mp3.
-    ``auto_transcribe=true`` triggers transcription on success when an
-    active model is installed.
+    Returns ``(job_view, None)`` on success or ``(None, error_dict)`` on
+    failure. The caller is responsible for HTTP status mapping (single
+    posts surface 4xx; bulk posts return per-URL errors in the array).
     """
     from safety import is_safe_url
     from runner import run_info
 
-    data = request.get_json(silent=True) or {}
-    url = (data.get("url") or "").strip()
     if not url:
-        return jsonify({"error": "missing_url"}), 400
+        return None, {"error": "missing_url"}
     if not is_safe_url(url):
-        return jsonify({"error": "unsupported_url"}), 400
+        return None, {"error": "unsupported_url"}
 
-    format_choice = data.get("format", "video")
-    format_id = data.get("format_id")
-    title = (data.get("title") or "").strip()
-    thumbnail = (data.get("thumbnail") or "").strip()
-    auto_transcribe = bool(data.get("auto_transcribe"))
-
-    # If the caller didn't supply a title, do a one-shot info probe so
-    # the queue card has something useful to display. Fail soft — if
-    # info probe errors, fall back to the raw URL as the title.
     if not title:
         info = run_info(url)
         if info.error_category:
-            return jsonify({"error": info.error_category}), 400
+            return None, {"error": info.error_category}
         title = info.title or url
         if not thumbnail:
             thumbnail = info.thumbnail or ""
@@ -273,9 +469,121 @@ def submit_job():
             auto_transcribe=auto_transcribe,
         )
     except RuntimeError:
-        return jsonify({"error": "busy"}), 503
-    job = _jm().get(job_id)
-    return jsonify(_job_view(job)), 201
+        return None, {"error": "busy"}
+    return _job_view(_jm().get(job_id)), None
+
+
+@api_v1_bp.post("/jobs")
+@token_required
+def submit_job():
+    """Enqueue a new download. Body: ``{url, format?, format_id?, title?, auto_transcribe?}``.
+
+    ``format`` defaults to ``"video"`` (mp4); pass ``"audio"`` for mp3.
+    ``auto_transcribe=true`` triggers transcription on success when an
+    active model is installed.
+
+    Idempotency: if the request includes an ``Idempotency-Key`` header
+    AND the same key was used in the last 24h to create a job that
+    still exists, the same job is returned (HTTP 200 + ``X-Idempotent-
+    Replay: true`` header) instead of creating a duplicate.
+    """
+    idem_key = request.headers.get("Idempotency-Key", "").strip()
+    # Single-flight claim BEFORE enqueue so two concurrent retries with
+    # the same key never both reach the worker.
+    prior_id, claimed = _idempotency_store.claim(idem_key)
+    if prior_id is not None:
+        existing = _jm().get(prior_id)
+        if existing is not None:
+            resp = jsonify(_job_view(existing))
+            resp.headers["X-Idempotent-Replay"] = "true"
+            return resp, 200
+        # Prior id no longer in the manager (TTL'd out / dismissed).
+        # ``release()`` only drops placeholders, so use ``delete()`` to
+        # evict the finalized mapping before re-claiming — otherwise
+        # the second claim would observe the dead entry and 409 forever.
+        _idempotency_store.delete(idem_key)
+        prior_id, claimed = _idempotency_store.claim(idem_key)
+    if not claimed:
+        # Another request is still mid-enqueue for this key. Tell the
+        # client to retry instead of silently double-enqueuing.
+        return jsonify({"error": "in_flight",
+                         "message": "An identical request is still being processed."}), 409
+
+    data = request.get_json(silent=True) or {}
+    try:
+        view, err = _submit_one(
+            (data.get("url") or "").strip(),
+            format_choice=data.get("format", "video"),
+            format_id=data.get("format_id"),
+            title=(data.get("title") or "").strip(),
+            thumbnail=(data.get("thumbnail") or "").strip(),
+            auto_transcribe=bool(data.get("auto_transcribe")),
+        )
+    except BaseException:
+        _idempotency_store.release(idem_key)
+        raise
+    if err is not None:
+        _idempotency_store.release(idem_key)
+        # Map error codes to HTTP status. ``busy`` is a real 503 (queue
+        # full); everything else is a 400 (caller-side problem).
+        code = 503 if err["error"] == "busy" else 400
+        return jsonify(err), code
+    if idem_key:
+        _idempotency_store.put(idem_key, view["id"])
+    return jsonify(view), 201
+
+
+@api_v1_bp.post("/jobs/bulk")
+@token_required
+def submit_bulk():
+    """Enqueue many downloads in one round-trip.
+
+    Body: ``{urls: [...], format?, format_id?, auto_transcribe?}``.
+    Each URL gets its own job. Per-URL errors are returned alongside
+    successes — the response body is::
+
+        {
+          "submitted": 7,
+          "failed": 2,
+          "results": [
+            {"url": "...", "id": "abc123", "title": "..."},
+            {"url": "...", "error": "unsupported_url"},
+            ...
+          ]
+        }
+
+    HTTP 207 Multi-Status when any URL failed; 201 when all succeeded;
+    400 when the body itself is malformed.
+    """
+    data = request.get_json(silent=True) or {}
+    urls = data.get("urls")
+    if not isinstance(urls, list) or not urls:
+        return jsonify({"error": "missing_urls"}), 400
+    if len(urls) > 100:
+        return jsonify({"error": "too_many_urls", "limit": 100}), 400
+
+    fmt = data.get("format", "video")
+    fmt_id = data.get("format_id")
+    auto_t = bool(data.get("auto_transcribe"))
+
+    results = []
+    submitted = failed = 0
+    for raw in urls:
+        u = (raw or "").strip() if isinstance(raw, str) else ""
+        view, err = _submit_one(
+            u, format_choice=fmt, format_id=fmt_id,
+            auto_transcribe=auto_t,
+        )
+        if view is not None:
+            results.append({"url": u, "id": view["id"], "title": view["title"]})
+            submitted += 1
+        else:
+            results.append({"url": u, **err})
+            failed += 1
+    status_code = 201 if failed == 0 else 207
+    return jsonify({
+        "submitted": submitted, "failed": failed, "results": results,
+    }), status_code
 
 
 @api_v1_bp.post("/jobs/<job_id>/pause")
@@ -331,7 +639,105 @@ def get_job_file(job_id):
 @api_v1_bp.get("/transcripts")
 @token_required
 def list_transcripts():
-    return jsonify({"transcripts": [_tj_view(t) for t in _tm().snapshot_jobs()]})
+    """Same pagination + filtering surface as :func:`list_jobs`."""
+    limit, offset, order, status = _parse_page_args()
+    page, total = _paginate(
+        _tm().snapshot_jobs(),
+        status=status, status_attr="status",
+        order=order, limit=limit, offset=offset,
+    )
+    return jsonify({
+        "transcripts": [_tj_view(t) for t in page],
+        "total": total, "returned": len(page),
+        "limit": _surface_limit(limit, len(page)), "offset": offset,
+    })
+
+
+@api_v1_bp.get("/transcripts/search")
+@token_required
+def search_transcripts():
+    """Substring search across all completed transcripts.
+
+    Query: ``?q=<phrase>&limit=&context=``.
+    Returns matches with a contextual snippet (default ±60 chars) and
+    the timing range of the words that contained the hit, so the
+    caller can deep-link into the editor at the right point.
+    """
+    q = (request.args.get("q") or "").strip()
+    if not q:
+        return jsonify({"error": "missing_query"}), 400
+    try:
+        limit = int(request.args.get("limit", "50"))
+    except ValueError:
+        limit = 50
+    limit = max(1, min(200, limit))
+    try:
+        ctx = int(request.args.get("context", "60"))
+    except ValueError:
+        ctx = 60
+    ctx = max(0, min(400, ctx))
+
+    needle = q.lower()
+    matches = []
+    for tj in _tm().snapshot_jobs():
+        if tj.status != transcribe_jobs.TranscribeStatus.DONE:
+            continue
+        parent = _jm().get(tj.parent_job_id)
+        if parent is None or not parent.file_path:
+            continue
+        words_path = os.path.splitext(parent.file_path)[0] + ".words.json"
+        if not os.path.exists(words_path):
+            continue
+        try:
+            data = transcript_io.load(words_path)
+        except Exception:
+            continue
+        words = data.get("words") or []
+        # Build a flat text + a per-char index → word map so we can
+        # convert string-match offsets back to word ranges (and from
+        # there, to start/end timestamps for deep-linking).
+        chunks = []
+        char_to_widx = []
+        for i, w in enumerate(words):
+            if w.get("deleted"):
+                continue
+            text = w.get("w") or ""
+            if chunks:
+                chunks.append(" ")
+                char_to_widx.append(i)
+            chunks.append(text)
+            char_to_widx.extend([i] * len(text))
+        flat = "".join(chunks)
+        if not flat:
+            continue
+        flat_lower = flat.lower()
+        start = 0
+        while True:
+            hit = flat_lower.find(needle, start)
+            if hit == -1:
+                break
+            end = hit + len(needle)
+            w_start = char_to_widx[hit] if hit < len(char_to_widx) else 0
+            w_end = char_to_widx[end - 1] if end - 1 < len(char_to_widx) else w_start
+            snippet_lo = max(0, hit - ctx)
+            snippet_hi = min(len(flat), end + ctx)
+            snippet = flat[snippet_lo:snippet_hi]
+            matches.append({
+                "transcript_id": tj.id,
+                "parent_job_id": tj.parent_job_id,
+                "title": parent.title,
+                "snippet": ("…" if snippet_lo > 0 else "") + snippet
+                           + ("…" if snippet_hi < len(flat) else ""),
+                "start_seconds": float(words[w_start].get("start") or 0.0),
+                "end_seconds":   float(words[w_end].get("end") or 0.0),
+                "match_offset": hit,
+            })
+            if len(matches) >= limit:
+                break
+            start = end
+        if len(matches) >= limit:
+            break
+    return jsonify({"query": q, "matches": matches, "returned": len(matches)})
 
 
 @api_v1_bp.get("/transcripts/<tid>")
@@ -501,3 +907,257 @@ def install_model(name):
 def install_progress():
     with _install_lock:
         return jsonify(dict(_install_state))
+
+
+# ----- storage / disk usage ------------------------------------------
+
+def _file_size(path: str) -> int:
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+@api_v1_bp.get("/storage")
+@token_required
+def storage_info():
+    """Disk-usage report for the download directory.
+
+    Walks the on-disk tree (NOT the JobManager) so orphan files left
+    behind by crashes are still counted — this is the same number the
+    user would get from ``du -sb downloads/``. Per-job breakdown is
+    derived by matching files to job IDs (file basename starts with
+    the job id) so the user can see which downloads are taking space.
+
+    Response::
+
+        {
+          "download_dir": "/abs/path/downloads",
+          "total_bytes": 12345,
+          "file_count": 7,
+          "by_job": [
+            {"id": "abc", "title": "...", "bytes": 1234,
+             "files": [{"path": "...", "bytes": 1234}]},
+            ...
+          ],
+          "orphan_bytes": 0,
+          "orphan_files": []
+        }
+    """
+    root = _download_dir()
+    by_job: dict[str, dict] = {}
+    orphan_files: list[dict] = []
+    orphan_bytes = 0
+    total = 0
+    file_count = 0
+
+    # Index known job ids once so file-to-job attribution is O(N+M).
+    jobs_by_id = {j.id: j for j in _jm().snapshot_jobs()}
+
+    if root.exists():
+        for entry in os.scandir(root):
+            if not entry.is_file():
+                continue
+            # Internal bookkeeping files we never want to surface.
+            if entry.name in ("jobs.json", "transcribe_jobs.json"):
+                continue
+            size = _file_size(entry.path)
+            total += size
+            file_count += 1
+            # Job ids are the prefix of the filename up to the first
+            # `.` (e.g. ``abc123.mp4`` or ``abc123.words.json``).
+            stem = entry.name.split(".", 1)[0]
+            if stem in jobs_by_id:
+                slot = by_job.setdefault(stem, {
+                    "id": stem,
+                    "title": jobs_by_id[stem].title,
+                    "bytes": 0,
+                    "files": [],
+                })
+                slot["bytes"] += size
+                slot["files"].append({"name": entry.name, "bytes": size})
+            else:
+                orphan_files.append({"name": entry.name, "bytes": size})
+                orphan_bytes += size
+
+    # Sort biggest first so the report is immediately useful.
+    by_job_list = sorted(by_job.values(), key=lambda d: d["bytes"], reverse=True)
+    orphan_files.sort(key=lambda d: d["bytes"], reverse=True)
+
+    return jsonify({
+        "download_dir": str(root),
+        "total_bytes": total,
+        "file_count": file_count,
+        "by_job": by_job_list,
+        "orphan_bytes": orphan_bytes,
+        "orphan_files": orphan_files,
+    })
+
+
+# ----- OpenAPI schema -------------------------------------------------
+
+# Hand-rolled because pulling in flask-openapi3 / apispec for ~25
+# routes is overkill, and we want the doc to read like prose, not
+# auto-generated noise. Keep this in sync with the actual handlers
+# above — there's a contract test (test_api_v1.py) that asserts every
+# registered ``/api/v1/*`` rule appears here.
+
+_OPENAPI_DOC = {
+    "openapi": "3.0.3",
+    "info": {
+        "title": "Trove API",
+        "version": "1.0",
+        "description": (
+            "JSON control surface for the Trove media downloader / "
+            "transcript editor. Stable subset shared with the `trove` "
+            "CLI and the `trove-mcp` MCP server."
+        ),
+    },
+    "servers": [{"url": "/api/v1"}],
+    "paths": {
+        "/health":             {"get":  {"summary": "Liveness probe"}},
+        "/jobs":               {
+            "get":  {"summary": "List download jobs (paginated, filterable)",
+                      "parameters": [
+                          {"name": "status", "in": "query",
+                           "schema": {"type": "string"},
+                           "description": "Comma-separated status filter"},
+                          {"name": "limit",  "in": "query",
+                           "schema": {"type": "integer", "default": 100, "maximum": 500}},
+                          {"name": "offset", "in": "query",
+                           "schema": {"type": "integer", "default": 0}},
+                          {"name": "order",  "in": "query",
+                           "schema": {"type": "string", "enum": ["newest", "oldest"]}},
+                      ]},
+            "post": {"summary": "Submit a download",
+                      "parameters": [
+                          {"name": "Idempotency-Key", "in": "header",
+                           "schema": {"type": "string"},
+                           "description": "Opaque key; same key returns same job for 24h."},
+                      ]},
+        },
+        "/jobs/bulk":          {"post": {"summary": "Submit many downloads"}},
+        "/jobs/{job_id}":          {"get":  {"summary": "Get one job"}},
+        "/jobs/{job_id}/pause":    {"post": {"summary": "Pause a running job"}},
+        "/jobs/{job_id}/resume":   {"post": {"summary": "Resume a paused job"}},
+        "/jobs/{job_id}/cancel":   {"post": {"summary": "Cancel a job"}},
+        "/jobs/{job_id}/dismiss":  {"post": {"summary": "Drop a finished job"}},
+        "/jobs/{job_id}/file":     {"get":  {"summary": "Download the produced file"}},
+        "/jobs/{parent_job_id}/transcribe": {"post": {"summary": "Start transcription for a downloaded job"}},
+        "/transcripts":        {"get":  {"summary": "List transcripts (paginated, filterable)"}},
+        "/transcripts/search": {"get":  {"summary": "Substring search across completed transcripts",
+                                          "parameters": [
+                                              {"name": "q",       "in": "query", "required": True,
+                                               "schema": {"type": "string"}},
+                                              {"name": "limit",   "in": "query",
+                                               "schema": {"type": "integer", "default": 50, "maximum": 200}},
+                                              {"name": "context", "in": "query",
+                                               "schema": {"type": "integer", "default": 60}},
+                                          ]}},
+        "/transcripts/{tid}":           {"get":  {"summary": "Get one transcript"}},
+        "/transcripts/{tid}/cancel":    {"post": {"summary": "Cancel a transcribe"}},
+        "/transcripts/{tid}/dismiss":   {"post": {"summary": "Drop a finished transcribe"}},
+        "/transcripts/{tid}/export.{fmt}": {"get": {"summary": "Export txt/srt/vtt/json"}},
+        "/storage":            {"get":  {"summary": "Disk-usage report"}},
+        "/openapi.json":       {"get":  {"summary": "This document"}},
+        "/events":             {"get":  {"summary": "Server-Sent Events stream of jobs+transcripts",
+                                          "parameters": [
+                                              {"name": "max_events", "in": "query",
+                                               "schema": {"type": "integer"},
+                                               "description": "Test-only termination cap."},
+                                              {"name": "interval", "in": "query",
+                                               "schema": {"type": "number", "default": 1.0},
+                                               "description": "Poll interval in seconds (0.05-10)."},
+                                          ]}},
+        "/models":                       {"get":  {"summary": "List installed models"}},
+        "/models/install-progress":      {"get":  {"summary": "Poll model install progress"}},
+        "/models/{name}/use":            {"post": {"summary": "Mark a model as active"}},
+        "/models/{name}/remove":         {"post": {"summary": "Uninstall a model"}},
+        "/models/{name}/install":        {"post": {"summary": "Begin installing a model"}},
+    },
+    "headers_global": {
+        "X-RateLimit-Limit":     "Requests allowed per 60s window",
+        "X-RateLimit-Remaining": "Requests still available in window",
+        "X-RateLimit-Window":    "Window length in seconds (always 60)",
+        "Retry-After":           "Seconds to wait when rate-limited",
+    },
+}
+
+
+@api_v1_bp.get("/openapi.json")
+def openapi():
+    return jsonify(_OPENAPI_DOC)
+
+
+# ----- SSE event stream ----------------------------------------------
+
+def _events_snapshot() -> dict:
+    """Cheap full snapshot of jobs + transcripts. Diffing happens at
+    the client; the server stays stateless across SSE messages."""
+    return {
+        "ts": time.time(),
+        "jobs":        [_job_view(j) for j in _jm().snapshot_jobs()],
+        "transcripts": [_tj_view(t) for t in _tm().snapshot_jobs()],
+    }
+
+
+@api_v1_bp.get("/events")
+@token_required
+def events():
+    """SSE stream of job + transcript snapshots.
+
+    Emits one ``data:`` frame per change (poll-and-diff at 1s by
+    default; tunable with ``?interval=``). A heartbeat comment is
+    sent every 15s while idle so proxies don't drop the connection.
+
+    ``?max_events=N`` is a *test hook* — the generator exits cleanly
+    after N data frames so pytest doesn't have to kill a long-poll.
+    """
+    try:
+        interval = float(request.args.get("interval", "1.0"))
+    except ValueError:
+        interval = 1.0
+    interval = max(0.05, min(10.0, interval))
+    try:
+        max_events = int(request.args.get("max_events", "0"))
+    except ValueError:
+        max_events = 0
+
+    def gen():
+        last_payload: str | None = None
+        emitted = 0
+        last_heartbeat = time.monotonic()
+        # Always send the initial snapshot so the client has state to
+        # render on connect (otherwise it has to sit through one full
+        # interval of nothing).
+        first = _events_snapshot()
+        last_payload = json.dumps(first, sort_keys=True)
+        yield f"event: snapshot\ndata: {last_payload}\n\n"
+        emitted += 1
+        if max_events and emitted >= max_events:
+            return
+        while True:
+            time.sleep(interval)
+            try:
+                snap = _events_snapshot()
+            except Exception:
+                # Server tearing down — close cleanly.
+                return
+            payload = json.dumps(snap, sort_keys=True)
+            now = time.monotonic()
+            if payload != last_payload:
+                yield f"event: snapshot\ndata: {payload}\n\n"
+                last_payload = payload
+                last_heartbeat = now
+                emitted += 1
+                if max_events and emitted >= max_events:
+                    return
+            elif now - last_heartbeat >= 15.0:
+                yield ": keepalive\n\n"
+                last_heartbeat = now
+
+    resp = Response(stream_with_context(gen()), mimetype="text/event-stream")
+    # Defeat proxy buffering so events arrive in real time.
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp

@@ -336,3 +336,151 @@ def test_unreachable_server_exits_clearly(monkeypatch, capsys):
     with pytest.raises(SystemExit) as exc:
         cli._request("GET", "/api/v1/health")
     assert "trove serve" in str(exc.value)
+
+
+# ---- new CLI surface (bulk fetch / du / search / events / watch) ---
+
+def test_parser_accepts_new_subcommands():
+    p = cli.build_parser()
+    for argv in (
+        ["fetch", "https://a", "https://b"],
+        ["list", "--status=done", "--limit=5", "--offset=2", "--order=oldest", "--watch"],
+        ["transcripts", "--status=done,error"],
+        ["get", "abc", "--watch"],
+        ["transcript-status", "tid", "--watch"],
+        ["search", "hello", "--limit", "10", "--context", "30"],
+        ["du"],
+        ["events", "--max-events", "1", "--interval", "0.05"],
+    ):
+        ns = p.parse_args(argv)
+        assert callable(ns.func)
+
+
+def test_fetch_single_url_uses_jobs_endpoint(monkeypatch, capsys):
+    captured = {}
+    def fake_post(path, body=None, **kw):
+        captured["path"] = path
+        captured["body"] = body
+        return {"id": "id1", "title": "T", "url": "https://a", "status": "queued"}
+    monkeypatch.setattr(cli, "post", fake_post)
+    rc = cli.main(["fetch", "https://a"])
+    assert rc == 0
+    assert captured["path"] == "/api/v1/jobs"
+    assert "url" in captured["body"]
+
+
+def test_fetch_multi_url_uses_bulk_endpoint(monkeypatch, capsys):
+    captured = {}
+    def fake_post(path, body=None, **kw):
+        captured["path"] = path
+        captured["body"] = body
+        return {"submitted": 2, "failed": 0, "results": [
+            {"url": "https://a", "id": "id1", "title": "A"},
+            {"url": "https://b", "id": "id2", "title": "B"},
+        ]}
+    monkeypatch.setattr(cli, "post", fake_post)
+    rc = cli.main(["fetch", "https://a", "https://b", "--mp3"])
+    assert rc == 0
+    assert captured["path"] == "/api/v1/jobs/bulk"
+    assert captured["body"]["urls"] == ["https://a", "https://b"]
+    assert captured["body"]["format"] == "audio"
+    out = capsys.readouterr().out
+    assert "submitted 2 ok" in out and "id1" in out and "id2" in out
+
+
+def test_fetch_bulk_partial_failure_returns_2(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "post", lambda p, body=None, **kw: {
+        "submitted": 1, "failed": 1, "results": [
+            {"url": "https://a", "id": "i", "title": "A"},
+            {"url": "bad", "error": "unsupported_url"},
+        ],
+    })
+    rc = cli.main(["fetch", "https://a", "bad"])
+    assert rc == 2
+
+
+def test_list_passes_status_limit_offset_order(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(cli, "get", lambda p, **kw: (seen.setdefault("p", p),
+                                                       {"jobs": [], "total": 0, "returned": 0,
+                                                        "limit": 5, "offset": 2})[1])
+    cli.main(["list", "--status", "done,error", "--limit", "5",
+              "--offset", "2", "--order", "oldest"])
+    p = seen["p"]
+    assert "status=done%2Cerror" in p
+    assert "limit=5" in p and "offset=2" in p and "order=oldest" in p
+
+
+def test_du_renders_report(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "get", lambda p, **kw: {
+        "download_dir": "/tmp/d",
+        "total_bytes": 1024 * 1024 * 5,
+        "file_count": 3,
+        "by_job": [{"id": "abc", "title": "Big Clip", "bytes": 1024 * 1024 * 4,
+                    "files": []}],
+        "orphan_bytes": 1024,
+        "orphan_files": [{"name": "x.bin", "bytes": 1024}],
+    })
+    rc = cli.main(["du"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "5.0 MB" in out and "abc" in out and "Big Clip" in out
+    assert "orphans" in out and "x.bin" in out
+
+
+def test_search_renders_matches(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "get", lambda p, **kw: {
+        "query": "ml", "returned": 1,
+        "matches": [{"transcript_id": "t1", "parent_job_id": "p1",
+                     "title": "ML talk", "snippet": "...about ml...",
+                     "start_seconds": 75.0, "end_seconds": 76.0,
+                     "match_offset": 6}],
+    })
+    rc = cli.main(["search", "ml"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "t1" in out and "ML talk" in out and "1:15" in out
+
+
+def test_search_no_matches_returns_1(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "get", lambda p, **kw: {"matches": [], "returned": 0})
+    rc = cli.main(["search", "needle"])
+    assert rc == 1
+
+
+def test_events_max_events_terminates(monkeypatch, capsys):
+    """The CLI events command must exit cleanly when the server closes
+    the stream (which it does after max_events frames)."""
+    import io
+    payloads = [
+        b"event: snapshot\ndata: " +
+        json.dumps({"ts": 1700000000, "jobs": [], "transcripts": []}).encode() +
+        b"\n\n",
+    ]
+    class FakeResp:
+        def __init__(self, parts):
+            self._buf = b"".join(parts)
+            self._pos = 0
+        def read(self, n):
+            chunk = self._buf[self._pos:self._pos + n]
+            self._pos += len(chunk)
+            return chunk
+        def __enter__(self):  return self
+        def __exit__(self, *a): return False
+    monkeypatch.setattr(cli.urllib.request, "urlopen",
+                        lambda req, timeout=None: FakeResp(payloads))
+    rc = cli.main(["events", "--max-events", "1"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "jobs=0 transcripts=0" in out
+
+
+def test_parse_sse_extracts_data():
+    msg = "event: snapshot\ndata: {\"a\": 1}\n"
+    assert cli._parse_sse(msg) == {"a": 1}
+    assert cli._parse_sse(": keepalive") is None
+
+
+def test_format_seconds_handles_hms():
+    assert cli._format_seconds(75) == "1:15"
+    assert cli._format_seconds(3675) == "1:01:15"

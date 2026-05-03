@@ -120,12 +120,15 @@ def test_mcp_end_to_end(tmp_path):
         result = asyncio.run(_drive_mcp(port))
 
     expected_tools = {
-        "list_jobs", "get_job", "download_media", "pause_download",
-        "resume_download", "cancel_download", "dismiss_download",
-        "list_transcripts", "get_transcript_status", "transcribe",
+        "list_jobs", "get_job", "download_media", "bulk_download",
+        "pause_download", "resume_download", "cancel_download",
+        "dismiss_download",
+        "list_transcripts", "search_transcripts",
+        "get_transcript_status", "transcribe",
         "cancel_transcribe", "get_transcript",
         "list_models", "install_model", "model_install_progress",
         "set_active_model", "remove_model",
+        "storage_info",
     }
     assert set(result["tool_names"]) == expected_tools, result["tool_names"]
     assert "trove://transcript/{tid}" in result["templates"]

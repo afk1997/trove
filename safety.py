@@ -167,6 +167,30 @@ class RateLimiter:
             q.append(now)
             return True
 
+    def remaining(self, key: str) -> tuple[int, float]:
+        """Return ``(remaining_in_window, retry_after_seconds)`` for *key*.
+
+        Cheap, lock-held read used to populate ``X-RateLimit-Remaining``
+        + ``Retry-After`` response headers. ``retry_after_seconds`` is 0
+        when the key is under the limit.
+        """
+        if self.rate <= 0:
+            return (10**9, 0.0)
+        now = time.monotonic()
+        with self._lock:
+            q = self._hits.get(key)
+            if not q:
+                return (self.rate, 0.0)
+            cutoff = now - self.per_seconds
+            # Don't mutate during a read — count live hits manually.
+            live = sum(1 for ts in q if ts >= cutoff)
+            remaining = max(0, self.rate - live)
+            if remaining > 0:
+                return (remaining, 0.0)
+            # Over the limit → seconds until oldest live hit ages out.
+            oldest_live = next((ts for ts in q if ts >= cutoff), now)
+            return (0, max(0.0, self.per_seconds - (now - oldest_live)))
+
 
 def attach_security_headers(app):
     """Mount per-request CSP nonce + standard security headers on a Flask app."""

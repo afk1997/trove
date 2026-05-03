@@ -72,9 +72,24 @@ def _build_server():
     # ---- jobs (downloads) -------------------------------------------
 
     @mcp.tool()
-    def list_jobs() -> dict:
-        """List all download jobs (queued / downloading / paused / done / error)."""
-        return _safe(lambda: get("/api/v1/jobs"))
+    def list_jobs(
+        status: str = "",
+        limit: int = 100,
+        offset: int = 0,
+        order: str = "newest",
+    ) -> dict:
+        """List download jobs (paginated, filterable).
+
+        Args:
+            status: Comma-separated status filter (e.g. ``"done,error"``).
+                Empty string returns all jobs.
+            limit: 1-500, default 100.
+            offset: Skip this many jobs (use with ``limit`` to page).
+            order: ``"newest"`` (default) or ``"oldest"``.
+
+        Returns ``{jobs, total, returned, limit, offset}``.
+        """
+        return _safe(lambda: get("/api/v1/jobs" + _page_qs(status, limit, offset, order)))
 
     @mcp.tool()
     def get_job(job_id: str) -> dict:
@@ -94,6 +109,37 @@ def _build_server():
           (e.g. ``"downloading · 42% · 12.4 MB / 29.7 MB · 5.2 MB/s · ETA 0:03"``).
         """
         return _safe(lambda: get(f"/api/v1/jobs/{job_id}"))
+
+    @mcp.tool()
+    def bulk_download(
+        urls: list[str],
+        format: str = "video",
+        auto_transcribe: bool = False,
+    ) -> dict:
+        """Queue many downloads in one call.
+
+        Args:
+            urls: List of source URLs (max 100).
+            format: ``"video"`` or ``"audio"`` — applied to all.
+            auto_transcribe: Trigger transcription on each successful download.
+
+        Returns ``{submitted, failed, results}``. Each ``results`` entry
+        is either ``{url, id, title}`` (success) or ``{url, error}`` (failure)
+        — partial failures don't fail the whole call.
+        """
+        return _safe(lambda: post("/api/v1/jobs/bulk", body={
+            "urls": urls, "format": format, "auto_transcribe": auto_transcribe,
+        }))
+
+    @mcp.tool()
+    def storage_info() -> dict:
+        """Disk-usage report for the download directory.
+
+        Returns total bytes, file count, per-job breakdown
+        (``by_job``, sorted biggest first) and any orphan files left
+        behind by crashes.
+        """
+        return _safe(lambda: get("/api/v1/storage"))
 
     @mcp.tool()
     def download_media(
@@ -141,9 +187,34 @@ def _build_server():
     # ---- transcripts ------------------------------------------------
 
     @mcp.tool()
-    def list_transcripts() -> dict:
-        """List all transcribe jobs (queued / running / done / error)."""
-        return _safe(lambda: get("/api/v1/transcripts"))
+    def list_transcripts(
+        status: str = "",
+        limit: int = 100,
+        offset: int = 0,
+        order: str = "newest",
+    ) -> dict:
+        """List transcribe jobs (paginated, filterable).
+
+        Same paging semantics as ``list_jobs``.
+        """
+        return _safe(lambda: get("/api/v1/transcripts" + _page_qs(status, limit, offset, order)))
+
+    @mcp.tool()
+    def search_transcripts(query: str, limit: int = 50, context: int = 60) -> dict:
+        """Substring-search across all completed transcripts.
+
+        Args:
+            query: The phrase to find (case-insensitive).
+            limit: Max matches to return (1-200).
+            context: Characters of surrounding context per match.
+
+        Returns ``{query, matches, returned}``. Each match has
+        ``transcript_id``, ``parent_job_id``, ``title``, ``snippet``,
+        ``start_seconds`` and ``end_seconds`` so the agent can deep-link.
+        """
+        from urllib.parse import quote
+        qs = f"?q={quote(query)}&limit={int(limit)}&context={int(context)}"
+        return _safe(lambda: get("/api/v1/transcripts/search" + qs))
 
     @mcp.tool()
     def get_transcript_status(transcript_id: str) -> dict:
@@ -251,7 +322,37 @@ def _build_server():
         body = _safe(lambda: get(f"/api/v1/transcripts/{tid}/export.json"))
         return _json.dumps(body, indent=2) if isinstance(body, dict) else str(body)
 
+    @mcp.resource("trove://transcript/{tid}/text")
+    def transcript_text_resource(tid: str) -> str:
+        """Plain-text export of a transcript — handy for the agent to
+        ingest as a single string without parsing the v2 JSON tree."""
+        body = _safe(lambda: get(f"/api/v1/transcripts/{tid}/export.txt"))
+        if isinstance(body, dict) and body.get("error"):
+            return f"(error: {body['error']})"
+        return body if isinstance(body, str) else str(body)
+
+    @mcp.resource("trove://storage")
+    def storage_resource() -> str:
+        import json as _json
+        return _json.dumps(_safe(lambda: get("/api/v1/storage")), indent=2)
+
     return mcp
+
+
+def _page_qs(status: str, limit: int, offset: int, order: str) -> str:
+    """Compose ``?status=&limit=&offset=&order=`` from MCP-tool args.
+    Lives at module scope so the contract test can import + reuse it."""
+    from urllib.parse import quote
+    parts: list[str] = []
+    if status:
+        parts.append("status=" + quote(status))
+    if limit and limit != 100:
+        parts.append(f"limit={int(limit)}")
+    if offset:
+        parts.append(f"offset={int(offset)}")
+    if order and order != "newest":
+        parts.append(f"order={order}")
+    return ("?" + "&".join(parts)) if parts else ""
 
 
 def main() -> int:
