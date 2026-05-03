@@ -25,6 +25,59 @@ from typing import Any
 DEFAULT_URL = "http://127.0.0.1:5000"
 
 
+# ----- MCP <-> CLI parity map ----------------------------------------
+#
+# Single source of truth pinning every MCP tool to its CLI counterpart.
+# A test in tests/test_cli.py introspects the live FastMCP server and
+# fails if anything here drifts — adding a new MCP tool forces adding
+# either a CLI command for it or an explicit "no_cli_equivalent"
+# acknowledgement here.
+MCP_TO_CLI: dict[str, str] = {
+    "list_jobs":               "list",
+    "get_job":                 "get",
+    "download_media":          "fetch",
+    "pause_download":          "pause",
+    "resume_download":         "resume",
+    "cancel_download":         "cancel",
+    "dismiss_download":        "rm",
+    "list_transcripts":        "transcripts",
+    "get_transcript_status":   "transcript-status",
+    "transcribe":              "transcribe",
+    "cancel_transcribe":       "transcribe-cancel",
+    "get_transcript":          "transcript",
+    "list_models":             "models",
+    "install_model":           "model-install",
+    "model_install_progress":  "model-progress",
+    "set_active_model":        "model-use",
+    "remove_model":            "model-rm",
+}
+
+
+# ----- branding -------------------------------------------------------
+
+# Block-letter ASCII banner. Printed on `trove serve` (and bare `trove`)
+# only — never on scripted subcommands so it can't pollute stdout when
+# piping `trove --json list | jq`. Always written to stderr for the same
+# reason and only when stderr is a TTY.
+_BANNER = r"""
+ ████████ ██████   ██████  ██    ██ ███████
+    ██    ██   ██ ██    ██ ██    ██ ██
+    ██    ██████  ██    ██ ██    ██ █████
+    ██    ██   ██ ██    ██  ██  ██  ██
+    ██    ██   ██  ██████    ████   ███████
+"""
+
+
+def _print_banner(subtitle: str = "") -> None:
+    if not sys.stderr.isatty():
+        return
+    sys.stderr.write(_BANNER)
+    if subtitle:
+        sys.stderr.write(f"   {subtitle}\n")
+    sys.stderr.write("\n")
+    sys.stderr.flush()
+
+
 # ----- HTTP helpers ---------------------------------------------------
 
 class TroveError(RuntimeError):
@@ -120,21 +173,21 @@ def _print_json(obj: Any) -> None:
 
 
 def _format_job_row(j: dict) -> str:
-    pct = ""
-    if j.get("total_bytes"):
-        pct = f" {int(j['downloaded_bytes'] / j['total_bytes'] * 100):3d}%"
-    elif j.get("fragment_count"):
-        pct = f" {int(j['fragment_index'] / j['fragment_count'] * 100):3d}%"
-    return (
-        f"{j['id']:<10}  {j['status']:<11}{pct:>5}  "
-        f"{(j.get('title') or j['url'])[:60]}"
-    )
+    """Single-line table row for `trove list` — uses the new server-side
+    ``progress_pct`` and ``human.speed`` so we don't duplicate formatting.
+    """
+    pct = f"{j.get('progress_pct', 0):>3d}%"
+    title = (j.get("title") or j["url"])[:48]
+    speed = (j.get("human") or {}).get("speed", "—")
+    return f"{j['id']:<10}  {j['status']:<11}  {pct}  {speed:>10}  {title}"
 
 
 def _format_tj_row(t: dict) -> str:
+    h = t.get("human") or {}
     return (
         f"{t['id']:<10}  {t['status']:<10}  "
-        f"{t['progress_pct']:>3}%  parent={t['parent_job_id']:<10}  "
+        f"{t['progress_pct']:>3}%  {h.get('elapsed','—'):>6}  "
+        f"parent={t['parent_job_id']:<10}  "
         f"model={t.get('model_used') or '—'}"
     )
 
@@ -146,7 +199,7 @@ def cmd_serve(args) -> int:
     os.environ.setdefault("FLASK_ENV", "development")
     from app import create_app
     app = create_app()
-    print(f"trove: serving on http://127.0.0.1:{args.port}")
+    _print_banner(subtitle=f"self-hosted media · serving on http://{args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=False, use_reloader=False)
     return 0
 
@@ -214,9 +267,30 @@ def cmd_list(args) -> int:
     if not jobs:
         print("(no jobs)")
         return 0
-    print(f"{'ID':<10}  {'STATUS':<11}    %   TITLE")
+    print(f"{'ID':<10}  {'STATUS':<11}     %       SPEED  TITLE")
     for j in jobs:
         print(_format_job_row(j))
+    return 0
+
+
+def cmd_get(args) -> int:
+    """Inspect a single download job — same fields the MCP `get_job`
+    tool surfaces (raw + ``human.summary``)."""
+    j = get(f"/api/v1/jobs/{args.id}")
+    if getattr(args, "json", False):
+        _print_json(j)
+        return 0
+    h = j.get("human") or {}
+    print(f"{j['id']}  {j['status']}")
+    print(f"  url:       {j['url']}")
+    print(f"  title:     {j.get('title') or '—'}")
+    print(f"  format:    {j.get('format_choice','?')}")
+    print(f"  progress:  {h.get('summary','—')}")
+    print(f"  elapsed:   {h.get('elapsed','—')}    eta: {h.get('eta','—')}")
+    if j.get("filename"):
+        print(f"  file:      {j['filename']}")
+    if j.get("error_message"):
+        print(f"  error:     {j['error_category']} — {j['error_message']}")
     return 0
 
 
@@ -278,9 +352,54 @@ def cmd_transcripts(args) -> int:
     if not ts:
         print("(no transcripts)")
         return 0
-    print(f"{'ID':<10}  {'STATUS':<10}    %   PARENT     MODEL")
+    print(f"{'ID':<10}  {'STATUS':<10}    %  ELAPSED  PARENT     MODEL")
     for t in ts:
         print(_format_tj_row(t))
+    return 0
+
+
+def cmd_transcript_status(args) -> int:
+    """Poll a single transcribe job (mirror of MCP `get_transcript_status`)."""
+    t = get(f"/api/v1/transcripts/{args.id}")
+    if getattr(args, "json", False):
+        _print_json(t)
+        return 0
+    h = t.get("human") or {}
+    print(f"{t['id']}  {t['status']}")
+    print(f"  parent:   {t['parent_job_id']}")
+    print(f"  model:    {t.get('model_used') or '—'}")
+    print(f"  progress: {h.get('summary','—')}")
+    print(f"  audio:    {h.get('audio_duration','—')}    elapsed: {h.get('elapsed','—')}")
+    if t.get("language_detected"):
+        print(f"  lang:     {t['language_detected']}")
+    if t.get("error_message"):
+        print(f"  error:    {t['error_category']} — {t['error_message']}")
+    return 0
+
+
+def cmd_cancel_transcribe(args) -> int:
+    out = post(f"/api/v1/transcripts/{args.id}/cancel")
+    if out is None:
+        print(f"{args.id}: cancel requested")
+    else:
+        _print_json(out) if getattr(args, "json", False) else print(_format_tj_row(out))
+    return 0
+
+
+def cmd_model_progress(args) -> int:
+    p = get("/api/v1/models/install-progress")
+    if getattr(args, "json", False):
+        _print_json(p)
+        return 0
+    if not p.get("downloading") and not p.get("done"):
+        print("(no install in progress)")
+        return 0
+    rec, tot = p.get("received", 0), p.get("total", 0) or 1
+    print(f"{p.get('name','?')}: {int(rec/tot*100)}% "
+          f"({_human_bytes(rec)}/{_human_bytes(tot)}) "
+          f"{'done' if p.get('done') else 'downloading'}")
+    if p.get("error"):
+        print(f"  error: {p['error']}")
     return 0
 
 
@@ -402,6 +521,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = _sub("list", help="list all download jobs")
     s.set_defaults(func=cmd_list)
 
+    s = _sub("get", help="inspect one download job (rich progress)")
+    s.add_argument("id")
+    s.set_defaults(func=cmd_get)
+
     for action in ("pause", "resume", "cancel"):
         s = _sub(action, help=f"{action} a download job by id")
         s.add_argument("id")
@@ -418,6 +541,14 @@ def build_parser() -> argparse.ArgumentParser:
     s = _sub("transcripts", help="list all transcripts")
     s.set_defaults(func=cmd_transcripts)
 
+    s = _sub("transcript-status", help="poll one transcribe job")
+    s.add_argument("id")
+    s.set_defaults(func=cmd_transcript_status)
+
+    s = _sub("transcribe-cancel", help="cancel an in-flight transcribe")
+    s.add_argument("id")
+    s.set_defaults(func=cmd_cancel_transcribe)
+
     s = _sub("transcript", help="fetch / export a transcript")
     s.add_argument("id")
     s.add_argument("-f", "--format", choices=("txt", "srt", "vtt", "json"), default="txt")
@@ -432,6 +563,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--wait", action="store_true")
     s.set_defaults(func=cmd_model_install)
 
+    s = _sub("model-progress", help="check pending model-install progress")
+    s.set_defaults(func=cmd_model_progress)
+
     s = _sub("model-use", help="set the active model")
     s.add_argument("name")
     s.set_defaults(func=cmd_model_use)
@@ -445,6 +579,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
+    # Bare `trove` (no subcommand) → banner + help instead of an
+    # unfriendly argparse error. argparse's `required=True` on the
+    # subparsers would otherwise just print "error: the following
+    # arguments are required: <command>".
+    #
+    # Only fire on real bare-shell invocations (argv is None AND the
+    # process was launched with no args). Programmatic callers passing
+    # ``main([])`` get deterministic argparse behavior, not a surprise
+    # banner that depends on the host process's argv.
+    if argv is None and len(sys.argv) == 1:
+        _print_banner(subtitle="self-hosted media · run `trove --help`")
+        parser.print_help()
+        return 0
     args = parser.parse_args(argv)
     try:
         return args.func(args) or 0
