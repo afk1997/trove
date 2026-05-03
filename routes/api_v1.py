@@ -31,7 +31,10 @@ import models_store
 import transcribe_jobs
 import transcript_io
 from jobs import JobStatus
-from safety import token_or_sig_required, token_required
+from safety import (
+    token_or_sig_required, token_required,
+    SCOPE_MEDIA, SCOPE_TRANSCRIPT_EXPORT,
+)
 from util import sanitize_filename
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
@@ -623,7 +626,7 @@ def dismiss_job(job_id):
 
 
 @api_v1_bp.get("/jobs/<job_id>/file")
-@token_or_sig_required
+@token_or_sig_required(SCOPE_MEDIA, kwarg="job_id")
 def get_job_file(job_id):
     job = _jm().get(job_id)
     if job is None or job.status != JobStatus.DONE or not job.file_path:
@@ -790,7 +793,7 @@ def dismiss_transcript(tid):
 
 
 @api_v1_bp.get("/transcripts/<tid>/export.<fmt>")
-@token_or_sig_required
+@token_or_sig_required(SCOPE_TRANSCRIPT_EXPORT, kwarg="tid")
 def export_transcript(tid, fmt):
     """Stream the saved export artifact for a finished transcript.
 

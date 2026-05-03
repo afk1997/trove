@@ -96,52 +96,139 @@ def token_required(view):
     return wrapper
 
 
-def sign_resource(resource_id: str) -> str:
-    """Return an HMAC-SHA256 sig for `resource_id` keyed by TROVE_TOKEN.
+# ---------------------------------------------------------------------------
+# Signed-URL system
+# ---------------------------------------------------------------------------
+#
+# Some routes are reached via direct browser navigation (anchor clicks,
+# ``<video src>``) where the Authorization header isn't carried, so we
+# can't enforce the bearer token. The signed-URL escape hatch lets a
+# server-rendered template mint a one-off URL that authenticates itself
+# via ``?sig=&exp=`` query params signed by TROVE_TOKEN.
+#
+# Signature payload includes:
+#   * resource_id  — the route variable being authorized
+#   * scope        — explicit namespace (``media`` / ``transcript-view`` /
+#                    ``transcript-export``) so a media link can't be
+#                    replayed against an export endpoint and vice versa
+#   * expires_at   — unix timestamp; verifier rejects past-due sigs so a
+#                    leaked link stops working without rotating the token
+#
+# Signatures are HMAC-SHA256 over ``"{scope}|{resource_id}|{exp}"`` keyed
+# by TROVE_TOKEN. When TROVE_TOKEN is unset there's no signing (auth is
+# off entirely; ``signed_query`` returns ``""``).
 
-    Used to authenticate media URLs embedded in pages where the browser
-    can't attach an Authorization header (e.g. <video src>). Returns an
-    empty string when TROVE_TOKEN is unset (no signature needed).
+# Public scope constants. Routes/templates should use these instead of
+# raw strings so a typo can't silently produce an unverifiable sig.
+SCOPE_MEDIA              = "media"
+SCOPE_TRANSCRIPT_VIEW    = "transcript-view"
+SCOPE_TRANSCRIPT_EXPORT  = "transcript-export"
+_KNOWN_SCOPES = frozenset({SCOPE_MEDIA, SCOPE_TRANSCRIPT_VIEW, SCOPE_TRANSCRIPT_EXPORT})
+
+# Default sig TTL: 1 hour. Long enough that a user opening a transcript
+# page and clicking around for a while keeps working; short enough that
+# a leaked URL pasted into chat tomorrow is a 401. Override per-call or
+# globally via ``TROVE_SIG_TTL``.
+def _default_ttl() -> int:
+    raw = os.environ.get("TROVE_SIG_TTL", "").strip()
+    if raw.isdigit():
+        return int(raw)
+    return 3600
+
+
+def sign_resource(resource_id: str, scope: str,
+                  expires_in: int | None = None) -> tuple[str, int]:
+    """Mint ``(sig, exp)`` for ``resource_id`` under ``scope``.
+
+    Returns ``("", 0)`` when TROVE_TOKEN is unset (auth disabled). The
+    caller embeds both values into the URL as ``?sig=…&exp=…``. ``exp``
+    is a unix timestamp; the verifier rejects requests once it passes.
     """
+    if scope not in _KNOWN_SCOPES:
+        raise ValueError(f"unknown signing scope: {scope!r}")
     token = os.environ.get("TROVE_TOKEN", "").strip()
     if not token:
-        return ""
-    return hmac.new(token.encode(), resource_id.encode(), hashlib.sha256).hexdigest()
+        return ("", 0)
+    ttl = int(expires_in) if expires_in is not None else _default_ttl()
+    if ttl <= 0:
+        raise ValueError("expires_in must be > 0 seconds")
+    exp = int(time.time()) + ttl
+    payload = f"{scope}|{resource_id}|{exp}".encode()
+    sig = hmac.new(token.encode(), payload, hashlib.sha256).hexdigest()
+    return (sig, exp)
 
 
-def verify_resource_sig(resource_id: str, sig: str) -> bool:
-    """Constant-time check against the expected signature for resource_id."""
-    expected = sign_resource(resource_id)
-    if not expected:
-        return False
-    return hmac.compare_digest(expected, sig or "")
+def verify_signature(resource_id: str, scope: str,
+                     sig: str, exp: str | int) -> bool:
+    """Constant-time verify ``sig`` for ``(resource_id, scope, exp)``.
 
-
-def token_or_sig_required(view):
-    """Like token_required, but ALSO accepts a `?sig=…` query param signed by sign_resource.
-
-    Use on routes whose URL gets embedded in publicly-rendered HTML
-    (e.g. /api/file/<id> as a <video src>). The view handler must accept
-    the resource id as the FIRST positional argument so we can verify
-    the signature against it.
+    Returns False if TROVE_TOKEN is unset (signed URLs require a token
+    to be meaningful), if ``sig`` or ``exp`` is missing/malformed, or
+    if the signature has already expired.
     """
-    @wraps(view)
-    def wrapper(*args, **kwargs):
-        token = os.environ.get("TROVE_TOKEN", "").strip()
-        if not token:
-            return view(*args, **kwargs)
-        header = request.headers.get("Authorization", "")
-        if header == f"Bearer {token}":
-            return view(*args, **kwargs)
-        # Accept signed URL: extract the resource id from the route kwargs
-        sig = request.args.get("sig", "")
-        # Find the first kwarg that's the resource id (Flask passes route
-        # vars as kwargs). We accept any string-typed kwarg.
-        for v in kwargs.values():
-            if isinstance(v, str) and verify_resource_sig(v, sig):
+    token = os.environ.get("TROVE_TOKEN", "").strip()
+    if not token or not sig:
+        return False
+    if scope not in _KNOWN_SCOPES:
+        return False
+    try:
+        exp_i = int(exp)
+    except (TypeError, ValueError):
+        return False
+    if exp_i < int(time.time()):
+        return False
+    payload = f"{scope}|{resource_id}|{exp_i}".encode()
+    expected = hmac.new(token.encode(), payload, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, sig)
+
+
+def signed_query(resource_id: str, scope: str,
+                 expires_in: int | None = None) -> str:
+    """Return ``"sig=…&exp=…"`` (no leading ``?``) or ``""``.
+
+    Convenience helper for Jinja templates so they don't have to juggle
+    the (sig, exp) tuple. Empty string when TROVE_TOKEN is unset, so the
+    template can splice it unconditionally.
+    """
+    sig, exp = sign_resource(resource_id, scope, expires_in)
+    if not sig:
+        return ""
+    return f"sig={sig}&exp={exp}"
+
+
+def token_or_sig_required(scope: str, *, kwarg: str):
+    """Decorator factory: accept either the bearer token OR a scoped sig.
+
+    ``scope`` partitions the signature namespace (so a ``media`` sig
+    can't unlock a ``transcript-export`` route). ``kwarg`` is the name
+    of the Flask route variable holding the resource id — we verify
+    that kwarg specifically rather than "any string kwarg in the route"
+    so e.g. an export route's ``fmt`` parameter can't be misread as the
+    resource id.
+
+    When TROVE_TOKEN is unset the decorator is a passthrough.
+    """
+    if scope not in _KNOWN_SCOPES:
+        raise ValueError(f"unknown signing scope: {scope!r}")
+
+    def decorator(view):
+        @wraps(view)
+        def wrapper(*args, **kwargs):
+            token = os.environ.get("TROVE_TOKEN", "").strip()
+            if not token:
                 return view(*args, **kwargs)
-        return jsonify({"error": "unauthorized"}), 401
-    return wrapper
+            header = request.headers.get("Authorization", "")
+            if header == f"Bearer {token}":
+                return view(*args, **kwargs)
+            resource_id = kwargs.get(kwarg)
+            if isinstance(resource_id, str):
+                sig = request.args.get("sig", "")
+                exp = request.args.get("exp", "")
+                if verify_signature(resource_id, scope, sig, exp):
+                    return view(*args, **kwargs)
+            return jsonify({"error": "unauthorized"}), 401
+        return wrapper
+    return decorator
 
 
 class RateLimiter:

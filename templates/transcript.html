@@ -54,9 +54,11 @@
         <div class="t-tb-export-menu">
           {# Sign the export URLs so direct <a> downloads work even when
              TROVE_TOKEN is set — browsers can't attach Authorization
-             headers to anchor clicks. Mirrors the media-URL pattern. #}
-          {% set _es = sign_resource(tj.id) %}
-          {% set _q = ('?sig=' ~ _es) if _es else '' %}
+             headers to anchor clicks. Scope is ``transcript-export``
+             so the same sig can't be replayed against media or page
+             routes; ``exp`` bounds the link's lifetime. #}
+          {% set _eq = signed_query(tj.id, SCOPE_TRANSCRIPT_EXPORT) %}
+          {% set _q = ('?' ~ _eq) if _eq else '' %}
           <a href="/api/transcribe/{{ tj.id }}/export.txt{{ _q }}">.txt</a>
           <a href="/api/transcribe/{{ tj.id }}/export.srt{{ _q }}">.srt</a>
           <a href="/api/transcribe/{{ tj.id }}/export.vtt{{ _q }}">.vtt</a>

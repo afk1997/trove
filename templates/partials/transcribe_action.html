@@ -15,10 +15,11 @@
   {% elif state == "done" %}
     {# Sign the transcript URL so the link works under TROVE_TOKEN —
        /transcript/<id> is reached via direct anchor click and can't
-       carry an Authorization header. #}
-    {% set _ts = sign_resource(tj.id) %}
+       carry an Authorization header. Scope is ``transcript-view``
+       so the sig can't be replayed against export/media routes. #}
+    {% set _tq = signed_query(tj.id, SCOPE_TRANSCRIPT_VIEW) %}
     <a class="clip-transcribe-view"
-       href="/transcript/{{ tj.id }}{% if _ts %}?sig={{ _ts }}{% endif %}"
+       href="/transcript/{{ tj.id }}{% if _tq %}?{{ _tq }}{% endif %}"
        target="_blank">▸ view transcript ↗</a>
   {% elif state == "error" %}
     <span class="clip-transcribe-err">▸ transcribe failed</span>

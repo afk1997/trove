@@ -8,7 +8,10 @@ from safety import (
     is_safe_url,
     token_required,
     token_or_sig_required,
-    sign_resource,
+    signed_query,
+    SCOPE_MEDIA,
+    SCOPE_TRANSCRIPT_VIEW,
+    SCOPE_TRANSCRIPT_EXPORT,
     RateLimiter,
     attach_security_headers,
 )
@@ -54,10 +57,15 @@ BATCH_MAX_URLS = int(os.environ.get("TROVE_BATCH_MAX_URLS", "50"))
 def create_app() -> Flask:
     app = Flask(__name__)
     attach_security_headers(app)
-    # Expose sign_resource() to Jinja so templates can mint signed
+    # Expose signed_query() to Jinja so templates can mint signed
     # links for routes reached via direct browser navigation (anchor
     # clicks, <video src>) where the Authorization header isn't sent.
-    app.jinja_env.globals["sign_resource"] = sign_resource
+    # Templates pass the route variable + scope; the helper returns
+    # ``"sig=…&exp=…"`` (or empty when TROVE_TOKEN is unset).
+    app.jinja_env.globals["signed_query"]          = signed_query
+    app.jinja_env.globals["SCOPE_MEDIA"]           = SCOPE_MEDIA
+    app.jinja_env.globals["SCOPE_TRANSCRIPT_VIEW"] = SCOPE_TRANSCRIPT_VIEW
+    app.jinja_env.globals["SCOPE_TRANSCRIPT_EXPORT"] = SCOPE_TRANSCRIPT_EXPORT
 
     rate_limiter = RateLimiter(rate=RATE_LIMIT_PER_MIN, per_seconds=60)
     # Prefer the module-level DOWNLOAD_DIR so existing tests can use
@@ -279,7 +287,7 @@ def create_app() -> Flask:
         })
 
     @app.get("/api/file/<job_id>")
-    @token_or_sig_required
+    @token_or_sig_required(SCOPE_MEDIA, kwarg="job_id")
     def api_file(job_id):
         job = job_manager.get(job_id)
         if job is None or job.status != JobStatus.DONE or not job.file_path:
@@ -694,7 +702,7 @@ def create_app() -> Flask:
         return "", 200
 
     @app.get("/api/transcribe/<transcribe_id>/export.<fmt>")
-    @token_or_sig_required
+    @token_or_sig_required(SCOPE_TRANSCRIPT_EXPORT, kwarg="transcribe_id")
     def api_transcribe_export(transcribe_id, fmt):
         if fmt not in {"txt", "srt", "vtt"}:
             return abort(404)
@@ -730,7 +738,7 @@ def create_app() -> Flask:
         return tj, parent, base
 
     @app.get("/transcript/<transcribe_id>")
-    @token_or_sig_required
+    @token_or_sig_required(SCOPE_TRANSCRIPT_VIEW, kwarg="transcribe_id")
     def transcript_view(transcribe_id):
         tj, parent, base = _resolve_transcribe_paths(transcribe_id)
         if tj is None:
@@ -744,10 +752,12 @@ def create_app() -> Flask:
 
         # Sign the media URL so the <video src> works even when TROVE_TOKEN
         # is set (browsers can't attach Authorization headers to media src).
-        sig = sign_resource(parent.id)
+        # Scope is ``media`` so the sig can't be replayed against an
+        # export endpoint; ``exp`` bounds the link's lifetime.
         media_url = f"/api/file/{parent.id}"
-        if sig:
-            media_url = f"{media_url}?sig={sig}"
+        qs = signed_query(parent.id, SCOPE_MEDIA)
+        if qs:
+            media_url = f"{media_url}?{qs}"
 
         return render_template(
             "transcript.html",

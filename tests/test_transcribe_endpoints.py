@@ -346,12 +346,17 @@ def test_signed_file_url_works_under_token(tmp_path, monkeypatch):
     assert c.get("/api/file/abc1",
                  headers={"Authorization": "Bearer secret"}).status_code == 200
     # With matching sig → 200
-    from safety import sign_resource
-    sig = sign_resource("abc1")
-    assert sig  # token is set, so sig is non-empty
-    assert c.get(f"/api/file/abc1?sig={sig}").status_code == 200
+    from safety import sign_resource, SCOPE_MEDIA, SCOPE_TRANSCRIPT_EXPORT
+    sig, exp = sign_resource("abc1", SCOPE_MEDIA)
+    assert sig and exp  # token is set, so both are non-empty
+    assert c.get(f"/api/file/abc1?sig={sig}&exp={exp}").status_code == 200
     # With wrong sig → 401
-    assert c.get("/api/file/abc1?sig=deadbeef").status_code == 401
+    assert c.get(f"/api/file/abc1?sig=deadbeef&exp={exp}").status_code == 401
+    # Cross-scope replay: an export-scoped sig must NOT unlock /api/file.
+    bad_sig, bad_exp = sign_resource("abc1", SCOPE_TRANSCRIPT_EXPORT)
+    assert c.get(f"/api/file/abc1?sig={bad_sig}&exp={bad_exp}").status_code == 401
+    # Missing exp → 401 (sig alone is no longer sufficient).
+    assert c.get(f"/api/file/abc1?sig={sig}").status_code == 401
 
 
 def test_transcribe_start_idempotent_for_running_parent(client, tmp_path, monkeypatch):
@@ -489,12 +494,17 @@ def test_transcript_view_requires_token_or_sig(tmp_path, monkeypatch):
     assert c.get("/transcript/tj9",
                  headers={"Authorization": "Bearer secret"}).status_code == 200
     # Matching sig (transcribe_id is the resource) → 200
-    from safety import sign_resource
-    sig = sign_resource("tj9")
-    assert sig
-    assert c.get(f"/transcript/tj9?sig={sig}").status_code == 200
+    from safety import sign_resource, SCOPE_TRANSCRIPT_VIEW, SCOPE_TRANSCRIPT_EXPORT
+    sig, exp = sign_resource("tj9", SCOPE_TRANSCRIPT_VIEW)
+    assert sig and exp
+    assert c.get(f"/transcript/tj9?sig={sig}&exp={exp}").status_code == 200
     # Wrong sig → 401
-    assert c.get("/transcript/tj9?sig=deadbeef").status_code == 401
+    assert c.get(f"/transcript/tj9?sig=deadbeef&exp={exp}").status_code == 401
+    # Cross-scope replay: an export-scoped sig must NOT unlock the view route.
+    bad_sig, bad_exp = sign_resource("tj9", SCOPE_TRANSCRIPT_EXPORT)
+    assert c.get(f"/transcript/tj9?sig={bad_sig}&exp={bad_exp}").status_code == 401
+    # Missing exp → 401 (sig alone is no longer sufficient).
+    assert c.get(f"/transcript/tj9?sig={sig}").status_code == 401
 
 
 def test_export_requires_token_or_sig(tmp_path, monkeypatch):
@@ -517,11 +527,14 @@ def test_export_requires_token_or_sig(tmp_path, monkeypatch):
     assert c.get("/api/transcribe/tj8/export.txt",
                  headers={"Authorization": "Bearer secret"}).status_code == 200
     # Matching sig → 200
-    from safety import sign_resource
-    sig = sign_resource("tj8")
-    assert c.get(f"/api/transcribe/tj8/export.srt?sig={sig}").status_code == 200
+    from safety import sign_resource, SCOPE_TRANSCRIPT_EXPORT, SCOPE_MEDIA
+    sig, exp = sign_resource("tj8", SCOPE_TRANSCRIPT_EXPORT)
+    assert c.get(f"/api/transcribe/tj8/export.srt?sig={sig}&exp={exp}").status_code == 200
     # Wrong sig → 401
-    assert c.get("/api/transcribe/tj8/export.vtt?sig=deadbeef").status_code == 401
+    assert c.get(f"/api/transcribe/tj8/export.vtt?sig=deadbeef&exp={exp}").status_code == 401
+    # Cross-scope replay: a media-scoped sig must NOT unlock an export.
+    bad_sig, bad_exp = sign_resource("tj8", SCOPE_MEDIA)
+    assert c.get(f"/api/transcribe/tj8/export.srt?sig={bad_sig}&exp={bad_exp}").status_code == 401
 
 
 def test_csp_frame_ancestors_is_locked_down(client):

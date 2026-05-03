@@ -113,6 +113,106 @@ def test_rate_limiter_window_resets(monkeypatch):
     assert rl.allow("x") is True
 
 
+# ---------------------------------------------------------------------------
+# Signed-URL system: scope, expiry, and decorator-factory verification.
+# ---------------------------------------------------------------------------
+import safety
+from safety import (
+    sign_resource, verify_signature, signed_query,
+    token_or_sig_required,
+    SCOPE_MEDIA, SCOPE_TRANSCRIPT_VIEW, SCOPE_TRANSCRIPT_EXPORT,
+)
+
+
+def test_sign_resource_returns_empty_when_token_unset(monkeypatch):
+    monkeypatch.delenv("TROVE_TOKEN", raising=False)
+    sig, exp = sign_resource("abc", SCOPE_MEDIA)
+    assert sig == "" and exp == 0
+    # signed_query mirrors the empty contract so templates can splice
+    # the result unconditionally.
+    assert signed_query("abc", SCOPE_MEDIA) == ""
+
+
+def test_sign_and_verify_roundtrip(monkeypatch):
+    monkeypatch.setenv("TROVE_TOKEN", "hunter2")
+    sig, exp = sign_resource("abc", SCOPE_MEDIA, expires_in=60)
+    assert sig and exp > int(time.time())
+    assert verify_signature("abc", SCOPE_MEDIA, sig, exp) is True
+
+
+def test_verify_rejects_expired_sig(monkeypatch):
+    """A sig minted in the past must verify False even when otherwise valid."""
+    monkeypatch.setenv("TROVE_TOKEN", "hunter2")
+    sig, exp = sign_resource("abc", SCOPE_MEDIA, expires_in=60)
+    # Jump the clock 1h past expiry.
+    real_time = time.time
+    monkeypatch.setattr(safety.time, "time", lambda: real_time() + 3700)
+    assert verify_signature("abc", SCOPE_MEDIA, sig, exp) is False
+
+
+def test_verify_rejects_cross_scope_replay(monkeypatch):
+    """A sig minted under one scope must NOT verify under another."""
+    monkeypatch.setenv("TROVE_TOKEN", "hunter2")
+    sig, exp = sign_resource("abc", SCOPE_MEDIA, expires_in=60)
+    assert verify_signature("abc", SCOPE_TRANSCRIPT_EXPORT, sig, exp) is False
+    assert verify_signature("abc", SCOPE_TRANSCRIPT_VIEW,   sig, exp) is False
+
+
+def test_verify_rejects_cross_resource_replay(monkeypatch):
+    """A sig for resource A must NOT verify for resource B (same scope)."""
+    monkeypatch.setenv("TROVE_TOKEN", "hunter2")
+    sig, exp = sign_resource("abc", SCOPE_MEDIA, expires_in=60)
+    assert verify_signature("xyz", SCOPE_MEDIA, sig, exp) is False
+
+
+def test_verify_rejects_missing_or_garbage_exp(monkeypatch):
+    monkeypatch.setenv("TROVE_TOKEN", "hunter2")
+    sig, _ = sign_resource("abc", SCOPE_MEDIA, expires_in=60)
+    assert verify_signature("abc", SCOPE_MEDIA, sig, "")            is False
+    assert verify_signature("abc", SCOPE_MEDIA, sig, "not-a-number") is False
+    assert verify_signature("abc", SCOPE_MEDIA, sig, None)           is False  # type: ignore[arg-type]
+
+
+def test_verify_rejects_when_token_unset(monkeypatch):
+    """Even a structurally-valid sig must verify False with no token,
+    because TROVE_TOKEN being unset means the whole bearer system is
+    off — mistakenly accepting a sig in that mode would amount to a
+    permanent bypass."""
+    monkeypatch.setenv("TROVE_TOKEN", "hunter2")
+    sig, exp = sign_resource("abc", SCOPE_MEDIA, expires_in=60)
+    monkeypatch.delenv("TROVE_TOKEN", raising=False)
+    assert verify_signature("abc", SCOPE_MEDIA, sig, exp) is False
+
+
+def test_sign_resource_unknown_scope_raises(monkeypatch):
+    monkeypatch.setenv("TROVE_TOKEN", "hunter2")
+    with pytest.raises(ValueError):
+        sign_resource("abc", "made-up-scope")
+
+
+def test_decorator_factory_only_verifies_named_kwarg(monkeypatch):
+    """Regression: the old decorator accepted "any string kwarg" so an
+    export route's ``fmt`` parameter could (theoretically) be misread
+    as the resource id. The new factory must verify ONLY the named
+    kwarg — a sig minted for the wrong kwarg's value must not unlock."""
+    monkeypatch.setenv("TROVE_TOKEN", "hunter2")
+    monkeypatch.setenv("TROVE_RATE_LIMIT", "0")
+    app = Flask(__name__)
+
+    @app.get("/r/<rid>/<fmt>")
+    @token_or_sig_required(SCOPE_TRANSCRIPT_EXPORT, kwarg="rid")
+    def view(rid, fmt):
+        return f"{rid}:{fmt}"
+
+    c = app.test_client()
+    # Sig minted against rid → 200
+    sig, exp = sign_resource("R1", SCOPE_TRANSCRIPT_EXPORT, expires_in=60)
+    assert c.get(f"/r/R1/srt?sig={sig}&exp={exp}").status_code == 200
+    # Sig minted against the OTHER kwarg's value (fmt) must NOT unlock.
+    bad_sig, bad_exp = sign_resource("srt", SCOPE_TRANSCRIPT_EXPORT, expires_in=60)
+    assert c.get(f"/r/R1/srt?sig={bad_sig}&exp={bad_exp}").status_code == 401
+
+
 from safety import attach_security_headers
 
 
