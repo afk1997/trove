@@ -10,6 +10,7 @@
       <span>TROVE — A SAVING MACHINE FOR THE MODERN WEB</span>
     </div>
   </div>
+  <span class="hero-est">est. mmxxvi · self-hosted</span>
 
   <div class="hero-mark-row">
     <h1 class="hero-mark">trove<span class="period">.</span></h1>
@@ -17,9 +18,9 @@
   </div>
 
   <p class="hero-tag">
-    paste a link, get the file.
-    <span class="accent">no accounts, no upload limits, no telemetry.</span>
-    self-hosted on your machine.
+    <span class="lead">paste a link, get the file.</span>
+    <span class="accent">no accounts. no limits. no telemetry.</span>
+    <span class="meta">self-hosted on your machine.</span>
   </p>
 
   <form
@@ -64,16 +65,19 @@
   </form>
 
   <div class="hero-ticker">
-    <span>▼ youtube · tiktok · instagram · vimeo · 1000+</span>
+    <span class="sources">▼ youtube · tiktok · instagram · vimeo</span>
     <span class="right">
       <a href="/transcribe/setup" class="hero-ticker-link">transcribe settings ↗</a>
       <span class="sep">·</span>
-      MIT · SELF-HOSTED · v1.0
+      <span class="meta">MIT · v1.0</span>
     </span>
   </div>
 </div>
 
 <div class="queue-stack">
+  <div class="queue-rule" aria-hidden="true">
+    <span class="queue-rule-label">▼ queue</span>
+  </div>
   {% if not initial_cards %}
   <div id="empty-hint" class="empty-hint">
     <div class="arrow-up" aria-hidden="true">↑</div>
@@ -186,8 +190,8 @@
         return;
       }
       counter.hidden = false;
-      counter.textContent = n + ' / ' + MAX_URLS + ' urls';
       var over = n > MAX_URLS;
+      counter.textContent = (over ? '✕ ' : '') + n + ' / ' + MAX_URLS + ' urls';
       counter.classList.toggle('is-over', over);
       // Block the submit button when over the cap so users can't fire
       // a request the server will just reject. Defense-in-depth: the
