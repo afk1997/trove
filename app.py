@@ -31,6 +31,13 @@ DOWNLOAD_DIR.mkdir(exist_ok=True)
 JOB_TTL = int(os.environ.get("TROVE_JOB_TTL_SECONDS", "3600"))
 MAX_WORKERS = int(os.environ.get("TROVE_MAX_WORKERS", "4"))
 RATE_LIMIT_PER_MIN = int(os.environ.get("TROVE_RATE_LIMIT", "30"))
+# Hard cap on URLs accepted in one /api/batch-download request. Each URL
+# triggers a synchronous run_info() (~1-2s) and then a queued download,
+# so very large pastes would block the request thread for minutes and
+# flood the queue. 50 keeps the worst case under ~2 minutes and the
+# response payload under ~1 MB. The hero form mirrors the cap so users
+# get an inline error before they hit submit.
+BATCH_MAX_URLS = int(os.environ.get("TROVE_BATCH_MAX_URLS", "50"))
 
 
 def create_app() -> Flask:
@@ -48,6 +55,9 @@ def create_app() -> Flask:
         store_path=DOWNLOAD_DIR / "jobs.json",
     )
     app.extensions["trove.jobs"] = job_manager
+    # Expose the batch cap to templates so the hero form can render an
+    # inline counter and pre-flight check that mirror the server limit.
+    app.jinja_env.globals["BATCH_MAX_URLS"] = BATCH_MAX_URLS
     app.extensions["trove.rate_limiter"] = rate_limiter
 
     transcribe_manager = transcribe_jobs.TranscribeJobManager(
@@ -262,6 +272,12 @@ def create_app() -> Flask:
             return render_template("partials/card.html", card={
                 "kind": "error", "url": "", "category": "unsupported_url",
             }), 400
+        if len(urls) > BATCH_MAX_URLS:
+            return render_template("partials/card.html", card={
+                "kind": "error", "url": "",
+                "category": "too_many_urls",
+                "detail": {"count": len(urls), "max": BATCH_MAX_URLS},
+            }), 413
 
         rendered: list[str] = []
         for url in urls:

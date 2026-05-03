@@ -25,6 +25,7 @@
   <form
     id="fetch-form"
     class="hero-plate"
+    data-max-urls="{{ BATCH_MAX_URLS }}"
     hx-post="/api/info-card"
     hx-target="#queue"
     hx-swap="afterbegin"
@@ -57,6 +58,7 @@
         <input type="checkbox" id="auto-transcribe" name="auto_transcribe">
         transcribe after download
       </label>
+      <span id="url-counter" class="hero-counter" aria-live="polite" hidden></span>
       <button type="submit" class="hero-cta" id="fetch-btn">Save ↗</button>
     </div>
   </form>
@@ -172,6 +174,28 @@
       });
       return out;
     }
+    var MAX_URLS = parseInt(form.dataset.maxUrls || '50', 10);
+    var counter = document.getElementById('url-counter');
+    var fetchBtn = document.getElementById('fetch-btn');
+    function updateCounter() {
+      var n = countUrls();
+      if (n <= 1) {
+        counter.hidden = true;
+        counter.classList.remove('is-over');
+        fetchBtn.disabled = false;
+        return;
+      }
+      counter.hidden = false;
+      counter.textContent = n + ' / ' + MAX_URLS + ' urls';
+      var over = n > MAX_URLS;
+      counter.classList.toggle('is-over', over);
+      // Block the submit button when over the cap so users can't fire
+      // a request the server will just reject. Defense-in-depth: the
+      // beforeRequest handler also cancels and renders an inline error.
+      fetchBtn.disabled = over;
+    }
+    input.addEventListener('input', updateCounter);
+    setTimeout(updateCounter, 0);
     form.addEventListener('htmx:configRequest', function (evt) {
       var urls = splitUrls();
       if (urls.length > 1) {
@@ -185,6 +209,29 @@
         // would otherwise reject the raw textarea contents because
         // is_safe_url() can't parse a trailing comma.
         evt.detail.parameters['url'] = urls[0];
+      }
+    });
+    form.addEventListener('htmx:beforeRequest', function (evt) {
+      // Pre-flight cap check: prevent the round-trip and inject the
+      // same error card the server would have produced. Keeps the
+      // server endpoint as the source of truth for the limit.
+      var n = countUrls();
+      if (n > MAX_URLS) {
+        evt.preventDefault();
+        var queue = document.getElementById('queue');
+        if (queue) {
+          var html =
+            '<div class="clip is-error">' +
+              '<div class="clip-thumb"></div>' +
+              '<div class="clip-body">' +
+                '<p class="clip-title">unable to fetch</p>' +
+                '<p class="clip-err-msg">too many urls in one paste</p>' +
+                '<p class="clip-err-url">pasted ' + n + ' · max ' + MAX_URLS + ' per batch</p>' +
+              '</div>' +
+              '<div class="clip-action"><span class="clip-error-stamp">✕ ERROR</span></div>' +
+            '</div>';
+          queue.insertAdjacentHTML('afterbegin', html);
+        }
       }
     });
   })();

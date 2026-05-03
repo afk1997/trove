@@ -191,6 +191,47 @@ def test_auto_transcribe_skipped_on_cancel_race(client, monkeypatch, tmp_path):
         "auto-transcribe must not fire when the parent download was cancelled"
 
 
+def test_batch_endpoint_rejects_oversized_paste(client, monkeypatch):
+    """Pasting more than BATCH_MAX_URLS must return 413 with a friendly
+    too_many_urls error card and never call run_info / run_download.
+    Defense-in-depth against accidental or malicious huge pastes."""
+    import app as _app
+    calls = {"info": 0, "download": 0}
+
+    def _spy_info(url, *, timeout=60):
+        calls["info"] += 1
+        return InfoResult(title="t", thumbnail="", duration=0, uploader="", formats=[])
+
+    def _spy_download(**kwargs):
+        calls["download"] += 1
+        return DownloadResult(file_path="")
+
+    monkeypatch.setattr(_app, "run_info", _spy_info)
+    monkeypatch.setattr(_app, "run_download", _spy_download)
+    monkeypatch.setattr(_app, "BATCH_MAX_URLS", 5)
+
+    raw = ",".join(f"https://example.com/v{i}" for i in range(20))
+    r = client.post("/api/batch-download", data={"urls": raw, "format": "video"})
+    assert r.status_code == 413
+    body = r.data.decode()
+    assert "too many urls" in body.lower()
+    assert "20" in body and "5" in body  # count and max surfaced
+    assert calls["info"] == 0
+    assert calls["download"] == 0
+
+
+def test_batch_endpoint_accepts_paste_at_cap(client, monkeypatch, tmp_path):
+    """Exactly BATCH_MAX_URLS should still be accepted (off-by-one guard)."""
+    import app as _app
+    monkeypatch.setattr(_app, "run_info", _stub_info())
+    monkeypatch.setattr(_app, "run_download", _stub_download(tmp_path))
+    monkeypatch.setattr(_app, "BATCH_MAX_URLS", 3)
+    raw = "\n".join(f"https://example.com/v{i}" for i in range(3))
+    r = client.post("/api/batch-download", data={"urls": raw, "format": "video"})
+    assert r.status_code == 200
+    assert r.data.decode().count('class="clip') >= 3
+
+
 def test_single_url_through_info_card_carries_auto_transcribe_flag(
     client, monkeypatch, tmp_path,
 ):

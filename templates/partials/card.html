@@ -7,6 +7,7 @@
   "network": "network problem — check connection",
   "timeout": "request timed out",
   "busy": "server busy — try again",
+  "too_many_urls": "too many urls in one paste",
   "unknown": "something went wrong",
 } %}
 
@@ -32,7 +33,9 @@
   <div class="clip-body">
     <p class="clip-title">unable to fetch</p>
     <p class="clip-err-msg">{{ msgs.get(card.category, msgs["unknown"]) }}</p>
-    {% if card.url %}
+    {% if card.category == "too_many_urls" and card.detail %}
+      <p class="clip-err-url">pasted {{ card.detail.count }} · max {{ card.detail.max }} per batch</p>
+    {% elif card.url %}
       <p class="clip-err-url">{{ card.url }}</p>
     {% endif %}
   </div>
