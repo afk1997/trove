@@ -1062,7 +1062,8 @@ def create_app() -> Flask:
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    host = os.environ.get("HOST", "0.0.0.0")
+    from config import DEFAULT_HOST, DEFAULT_PORT, assert_safe_bind
+    # Refuse to start on a public bind without auth — see config.py.
+    assert_safe_bind(DEFAULT_HOST)
     app = create_app()
-    app.run(host=host, port=port)
+    app.run(host=DEFAULT_HOST, port=DEFAULT_PORT)

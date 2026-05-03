@@ -1,9 +1,9 @@
 """``trove`` — command-line interface for the Trove media downloader / transcript editor.
 
-Talks to a running Trove HTTP server (default ``http://127.0.0.1:5000``)
+Talks to a running Trove HTTP server (default ``http://127.0.0.1:8899``)
 through the stable ``/api/v1`` JSON API. Configurable via env vars:
 
-    TROVE_URL    Base URL of the running server (default localhost:5000).
+    TROVE_URL    Base URL of the running server (default localhost:8899).
     TROVE_TOKEN  Bearer token if the server was started with one.
 
 Stdlib-only on purpose so the CLI installs everywhere Python 3.11+ runs
@@ -22,7 +22,7 @@ import urllib.request
 from typing import Any
 
 
-DEFAULT_URL = "http://127.0.0.1:5000"
+from config import DEFAULT_BASE_URL as DEFAULT_URL  # noqa: E402
 
 
 # ----- MCP <-> CLI parity map ----------------------------------------
@@ -200,6 +200,10 @@ def _format_tj_row(t: dict) -> str:
 def cmd_serve(args) -> int:
     """Start the Flask dev server in-process."""
     os.environ.setdefault("FLASK_ENV", "development")
+    from config import assert_safe_bind
+    # Refuse to start on a public bind without auth — see config.py.
+    # Raises UnauthenticatedPublicBindError with a helpful message.
+    assert_safe_bind(args.host)
     from app import create_app
     app = create_app()
     _print_banner(subtitle=f"self-hosted media · serving on http://{args.host}:{args.port}")
@@ -737,8 +741,12 @@ def build_parser() -> argparse.ArgumentParser:
         return sub.add_parser(name, parents=[json_parent], **kw)
 
     s = _sub("serve", help="run the Trove web/API server")
-    s.add_argument("--host", default="0.0.0.0")
-    s.add_argument("--port", type=int, default=5000)
+    # Defaults come from config.py — env-var overrides honored. Binding to
+    # 0.0.0.0 without TROVE_TOKEN (or TROVE_ALLOW_UNAUTH_PUBLIC=1) is
+    # rejected at runtime by config.assert_safe_bind.
+    from config import DEFAULT_HOST, DEFAULT_PORT
+    s.add_argument("--host", default=DEFAULT_HOST)
+    s.add_argument("--port", type=int, default=DEFAULT_PORT)
     s.set_defaults(func=cmd_serve)
 
     s = _sub("health", help="check that a Trove server is reachable")

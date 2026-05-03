@@ -9,7 +9,7 @@ inside transcripts, and manage whisper models.
 Transport: stdio (the default for desktop MCP clients).
 
 Configuration (env vars):
-    TROVE_URL    Base URL of the Trove server (default localhost:5000).
+    TROVE_URL    Base URL of the Trove server (default localhost:8899).
     TROVE_TOKEN  Bearer token if the server was started with one.
 
 Usage in a client config (Claude Desktop / Cursor):
@@ -17,7 +17,7 @@ Usage in a client config (Claude Desktop / Cursor):
       "mcpServers": {
         "trove": {
           "command": "trove-mcp",
-          "env": { "TROVE_URL": "http://127.0.0.1:5000" }
+          "env": { "TROVE_URL": "http://127.0.0.1:8899" }
         }
       }
     }
@@ -356,8 +356,9 @@ def _page_qs(status: str, limit: int, offset: int, order: str) -> str:
 
 
 def main() -> int:
+    from config import DEFAULT_BASE_URL
     server = _build_server()
-    base = os.environ.get("TROVE_URL", "http://127.0.0.1:5000")
+    base = os.environ.get("TROVE_URL", DEFAULT_BASE_URL)
     print(f"trove-mcp: Trove API → {base}", file=sys.stderr)
     server.run()
     return 0
