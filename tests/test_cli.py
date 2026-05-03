@@ -338,6 +338,48 @@ def test_unreachable_server_exits_clearly(monkeypatch, capsys):
     assert "trove serve" in str(exc.value)
 
 
+# ---- shim chain back-compat ----------------------------------------
+#
+# After the trove_client extraction, ``cli.get/post/_request/_headers``
+# became thin shims that delegate to a TroveClient. These tests pin the
+# chain so a downstream test that monkeypatches any link still wins:
+# get/post must call _request, and _request must consult _headers.
+
+def test_get_post_route_through_request_shim(monkeypatch):
+    """Monkeypatching ``cli._request`` must intercept ``cli.get`` /
+    ``cli.post`` — both shims have to go through the chain."""
+    seen: list[tuple] = []
+    def fake(method, path, **kw):
+        seen.append((method, path, kw))
+        return {"intercepted": True}
+    monkeypatch.setattr(cli, "_request", fake)
+    assert cli.get("/api/v1/jobs") == {"intercepted": True}
+    assert cli.post("/api/v1/jobs", body={"x": 1}) == {"intercepted": True}
+    assert seen[0][:2] == ("GET", "/api/v1/jobs")
+    assert seen[1][:2] == ("POST", "/api/v1/jobs")
+    assert seen[1][2]["body"] == {"x": 1}
+
+
+def test_request_consults_module_level_headers(monkeypatch):
+    """Monkeypatching ``cli._headers`` must change the headers that go
+    on the wire — the shim chain has to feed them into the client."""
+    captured: dict = {}
+    def fake_urlopen(req, timeout=None):
+        captured["headers"] = dict(req.header_items())
+        class _R:
+            status = 204
+            headers = {"Content-Type": "application/json"}
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self, n=-1): return b""
+        return _R()
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(cli, "_headers",
+                        lambda: {"Accept": "application/json", "X-Test": "yes"})
+    cli._request("GET", "/api/v1/health")
+    assert captured["headers"].get("X-test") == "yes"
+
+
 # ---- new CLI surface (bulk fetch / du / search / events / watch) ---
 
 def test_parser_accepts_new_subcommands():

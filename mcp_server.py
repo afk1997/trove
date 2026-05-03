@@ -30,11 +30,17 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Any
 
-# Reuse the CLI's HTTP plumbing — same env vars, same error mapping,
-# same auth header shape — so the two surfaces stay in lockstep.
-from cli import TroveError, get, post
+# Depend on the shared client, NOT on cli.py — the MCP server should
+# never inherit CLI-specific behavior (terminal formatting, exit
+# semantics, banners, argparse assumptions, stdout/stderr conventions).
+from trove_client import TroveClient, TroveError
+
+
+# Module-level client. Properties read TROVE_URL / TROVE_TOKEN at call
+# time so a re-export of the env var (e.g. via the host MCP client
+# config) takes effect on the next tool call without rebuilding.
+_client = TroveClient()
 
 
 def _safe(call):
@@ -89,7 +95,8 @@ def _build_server():
 
         Returns ``{jobs, total, returned, limit, offset}``.
         """
-        return _safe(lambda: get("/api/v1/jobs" + _page_qs(status, limit, offset, order)))
+        return _safe(lambda: _client.list_jobs(
+            status=status, limit=limit, offset=offset, order=order))
 
     @mcp.tool()
     def get_job(job_id: str) -> dict:
@@ -108,7 +115,7 @@ def _build_server():
           ``summary`` one-liner you can paste straight into a reply
           (e.g. ``"downloading · 42% · 12.4 MB / 29.7 MB · 5.2 MB/s · ETA 0:03"``).
         """
-        return _safe(lambda: get(f"/api/v1/jobs/{job_id}"))
+        return _safe(lambda: _client.get_job(job_id))
 
     @mcp.tool()
     def bulk_download(
@@ -127,9 +134,8 @@ def _build_server():
         is either ``{url, id, title}`` (success) or ``{url, error}`` (failure)
         — partial failures don't fail the whole call.
         """
-        return _safe(lambda: post("/api/v1/jobs/bulk", body={
-            "urls": urls, "format": format, "auto_transcribe": auto_transcribe,
-        }))
+        return _safe(lambda: _client.bulk_download(
+            urls, fmt=format, auto_transcribe=auto_transcribe))
 
     @mcp.tool()
     def storage_info() -> dict:
@@ -139,7 +145,7 @@ def _build_server():
         (``by_job``, sorted biggest first) and any orphan files left
         behind by crashes.
         """
-        return _safe(lambda: get("/api/v1/storage"))
+        return _safe(lambda: _client.storage_info())
 
     @mcp.tool()
     def download_media(
@@ -157,31 +163,29 @@ def _build_server():
                 active model is installed.
             title: Optional override; defaults to the source title.
         """
-        body: dict = {"url": url, "format": format,
-                      "auto_transcribe": auto_transcribe}
-        if title:
-            body["title"] = title
-        return _safe(lambda: post("/api/v1/jobs", body=body))
+        return _safe(lambda: _client.submit_download(
+            url, fmt=format, auto_transcribe=auto_transcribe,
+            title=title or None))
 
     @mcp.tool()
     def pause_download(job_id: str) -> dict:
         """Pause an in-flight download. The .part file is preserved."""
-        return _safe(lambda: post(f"/api/v1/jobs/{job_id}/pause"))
+        return _safe(lambda: _client.pause_job(job_id))
 
     @mcp.tool()
     def resume_download(job_id: str) -> dict:
         """Resume a paused download (re-uses the persisted format/url)."""
-        return _safe(lambda: post(f"/api/v1/jobs/{job_id}/resume"))
+        return _safe(lambda: _client.resume_job(job_id))
 
     @mcp.tool()
     def cancel_download(job_id: str) -> dict:
         """Cancel a download. Removes any partial output."""
-        return _safe(lambda: post(f"/api/v1/jobs/{job_id}/cancel"))
+        return _safe(lambda: _client.cancel_job(job_id))
 
     @mcp.tool()
     def dismiss_download(job_id: str) -> dict:
         """Dismiss a terminal job (done/error/cancelled) and delete its file."""
-        r = _safe(lambda: post(f"/api/v1/jobs/{job_id}/dismiss"))
+        r = _safe(lambda: _client.dismiss_job(job_id))
         return {"ok": True, "job_id": job_id} if r is None else r
 
     # ---- transcripts ------------------------------------------------
@@ -197,7 +201,8 @@ def _build_server():
 
         Same paging semantics as ``list_jobs``.
         """
-        return _safe(lambda: get("/api/v1/transcripts" + _page_qs(status, limit, offset, order)))
+        return _safe(lambda: _client.list_transcripts(
+            status=status, limit=limit, offset=offset, order=order))
 
     @mcp.tool()
     def search_transcripts(query: str, limit: int = 50, context: int = 60) -> dict:
@@ -212,9 +217,8 @@ def _build_server():
         ``transcript_id``, ``parent_job_id``, ``title``, ``snippet``,
         ``start_seconds`` and ``end_seconds`` so the agent can deep-link.
         """
-        from urllib.parse import quote
-        qs = f"?q={quote(query)}&limit={int(limit)}&context={int(context)}"
-        return _safe(lambda: get("/api/v1/transcripts/search" + qs))
+        return _safe(lambda: _client.search_transcripts(
+            query, limit=limit, context=context))
 
     @mcp.tool()
     def get_transcript_status(transcript_id: str) -> dict:
@@ -228,7 +232,7 @@ def _build_server():
         ``summary`` one-liner (e.g. ``"running · 42% · of 9:12 audio
         · elapsed 1:08 · model=ggml-tiny.bin"``).
         """
-        return _safe(lambda: get(f"/api/v1/transcripts/{transcript_id}"))
+        return _safe(lambda: _client.get_transcript_status(transcript_id))
 
     @mcp.tool()
     def transcribe(parent_job_id: str) -> dict:
@@ -239,12 +243,12 @@ def _build_server():
         Requires an active whisper model (use ``install_model`` /
         ``set_active_model`` first if needed).
         """
-        return _safe(lambda: post(f"/api/v1/jobs/{parent_job_id}/transcribe"))
+        return _safe(lambda: _client.transcribe(parent_job_id))
 
     @mcp.tool()
     def cancel_transcribe(transcript_id: str) -> dict:
         """Cancel an in-flight transcribe job."""
-        return _safe(lambda: post(f"/api/v1/transcripts/{transcript_id}/cancel"))
+        return _safe(lambda: _client.cancel_transcribe(transcript_id))
 
     @mcp.tool()
     def get_transcript(transcript_id: str, format: str = "txt") -> dict:
@@ -262,7 +266,7 @@ def _build_server():
         """
         if format not in {"txt", "srt", "vtt", "json"}:
             return {"error": "format must be txt|srt|vtt|json"}
-        body = _safe(lambda: get(f"/api/v1/transcripts/{transcript_id}/export.{format}"))
+        body = _safe(lambda: _client.export_transcript(transcript_id, format))
         if isinstance(body, dict) and body.get("error"):
             return body
         if format == "json":
@@ -274,7 +278,7 @@ def _build_server():
     @mcp.tool()
     def list_models() -> dict:
         """List known whisper models with installed/active state."""
-        return _safe(lambda: get("/api/v1/models"))
+        return _safe(lambda: _client.list_models())
 
     @mcp.tool()
     def install_model(name: str) -> dict:
@@ -284,22 +288,22 @@ def _build_server():
         Names are e.g. ``"ggml-tiny.bin"``, ``"ggml-base.bin"``,
         ``"ggml-small.bin"``, ``"ggml-medium.bin"``.
         """
-        return _safe(lambda: post(f"/api/v1/models/{name}/install"))
+        return _safe(lambda: _client.install_model(name))
 
     @mcp.tool()
     def model_install_progress() -> dict:
         """Get the current model-install download progress."""
-        return _safe(lambda: get("/api/v1/models/install-progress"))
+        return _safe(lambda: _client.model_install_progress())
 
     @mcp.tool()
     def set_active_model(name: str) -> dict:
         """Mark an installed model as the active one (used for new transcribes)."""
-        return _safe(lambda: post(f"/api/v1/models/{name}/use"))
+        return _safe(lambda: _client.set_active_model(name))
 
     @mcp.tool()
     def remove_model(name: str) -> dict:
         """Delete an installed model from disk."""
-        r = _safe(lambda: post(f"/api/v1/models/{name}/remove"))
+        r = _safe(lambda: _client.remove_model(name))
         return {"ok": True, "name": name} if r is None else r
 
     # ---- resources --------------------------------------------------
@@ -309,24 +313,24 @@ def _build_server():
     @mcp.resource("trove://jobs")
     def jobs_resource() -> str:
         import json as _json
-        return _json.dumps(_safe(lambda: get("/api/v1/jobs")), indent=2)
+        return _json.dumps(_safe(lambda: _client.list_jobs()), indent=2)
 
     @mcp.resource("trove://transcripts")
     def transcripts_resource() -> str:
         import json as _json
-        return _json.dumps(_safe(lambda: get("/api/v1/transcripts")), indent=2)
+        return _json.dumps(_safe(lambda: _client.list_transcripts()), indent=2)
 
     @mcp.resource("trove://transcript/{tid}")
     def transcript_resource(tid: str) -> str:
         import json as _json
-        body = _safe(lambda: get(f"/api/v1/transcripts/{tid}/export.json"))
+        body = _safe(lambda: _client.export_transcript(tid, "json"))
         return _json.dumps(body, indent=2) if isinstance(body, dict) else str(body)
 
     @mcp.resource("trove://transcript/{tid}/text")
     def transcript_text_resource(tid: str) -> str:
         """Plain-text export of a transcript — handy for the agent to
         ingest as a single string without parsing the v2 JSON tree."""
-        body = _safe(lambda: get(f"/api/v1/transcripts/{tid}/export.txt"))
+        body = _safe(lambda: _client.export_transcript(tid, "txt"))
         if isinstance(body, dict) and body.get("error"):
             return f"(error: {body['error']})"
         return body if isinstance(body, str) else str(body)
@@ -342,25 +346,9 @@ def _build_server():
     @mcp.resource("trove://storage")
     def storage_resource() -> str:
         import json as _json
-        return _json.dumps(_safe(lambda: get("/api/v1/storage")), indent=2)
+        return _json.dumps(_safe(lambda: _client.storage_info()), indent=2)
 
     return mcp
-
-
-def _page_qs(status: str, limit: int, offset: int, order: str) -> str:
-    """Compose ``?status=&limit=&offset=&order=`` from MCP-tool args.
-    Lives at module scope so the contract test can import + reuse it."""
-    from urllib.parse import quote
-    parts: list[str] = []
-    if status:
-        parts.append("status=" + quote(status))
-    if limit and limit != 100:
-        parts.append(f"limit={int(limit)}")
-    if offset:
-        parts.append(f"offset={int(offset)}")
-    if order and order != "newest":
-        parts.append(f"order={order}")
-    return ("?" + "&".join(parts)) if parts else ""
 
 
 def main() -> int:

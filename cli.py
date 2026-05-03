@@ -23,6 +23,7 @@ from typing import Any
 
 
 from config import DEFAULT_BASE_URL as DEFAULT_URL  # noqa: E402
+from trove_client import TroveClient, TroveError, _parse_sse  # noqa: E402
 
 
 # ----- MCP <-> CLI parity map ----------------------------------------
@@ -82,80 +83,55 @@ def _print_banner(subtitle: str = "") -> None:
 
 
 # ----- HTTP helpers ---------------------------------------------------
+#
+# All HTTP plumbing lives in ``trove_client.TroveClient`` — both the
+# CLI and the MCP server depend on that shared client so neither
+# surface inherits the other's transport / formatting concerns.
+#
+# The module-level ``get`` / ``post`` / ``_headers`` / ``_request``
+# names are kept as thin shims that delegate to a default client.
+# They exist for two reasons:
+#   1. The existing test suite monkeypatches ``cli.get`` / ``cli.post``
+#      to mock HTTP without touching the network.
+#   2. Subcommand handlers can stay short (``get(path)`` reads better
+#      than ``_default_client.get(path)`` at every call site).
+#
+# ``TroveError`` is re-exported so legacy imports (``from cli import
+# TroveError``) keep working — but new code should import it from
+# ``trove_client`` directly.
 
-class TroveError(RuntimeError):
-    """Raised for any non-2xx response from the Trove server. Carries
-    the parsed JSON body (if any) so callers can format a useful
-    message instead of a bare urllib stack trace."""
-    def __init__(self, status: int, body: Any, url: str):
-        self.status = status
-        self.body = body
-        self.url = url
-        msg = body.get("error") if isinstance(body, dict) else str(body)
-        super().__init__(f"HTTP {status} {url} -> {msg}")
+# A single client whose properties read TROVE_URL / TROVE_TOKEN at
+# call time, so ``monkeypatch.setenv("TROVE_TOKEN", …)`` mid-test
+# takes effect on the very next request.
+_default_client = TroveClient()
 
 
+# The shim chain is intentionally layered exactly like the legacy
+# implementation — ``get/post`` → ``_request`` → ``_headers`` /
+# ``_base_url`` — so a test monkeypatching any link still intercepts
+# every higher-level call. The actual transport / parsing lives in
+# ``TroveClient.request``; we just feed it the patched bits.
 def _base_url() -> str:
-    return os.environ.get("TROVE_URL", DEFAULT_URL).rstrip("/")
+    return _default_client.base_url
 
 
 def _headers() -> dict:
-    h = {"Accept": "application/json"}
-    tok = os.environ.get("TROVE_TOKEN", "").strip()
-    if tok:
-        h["Authorization"] = f"Bearer {tok}"
-    return h
+    return _default_client._headers()
 
 
 def _request(method: str, path: str, *, body: dict | None = None,
              stream_to: str | None = None, timeout: int = 30) -> Any:
-    """Issue one HTTP call and parse the response.
-
-    Returns the decoded JSON body for 2xx responses, ``None`` for 204s.
-    Raises ``TroveError`` for everything else. When ``stream_to`` is
-    set, the response body is written to that file path verbatim
-    (used for export downloads).
-    """
-    url = _base_url() + path
-    data = None
-    headers = _headers()
-    if body is not None:
-        data = json.dumps(body).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, method=method, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            if stream_to is not None:
-                with open(stream_to, "wb") as out:
-                    while True:
-                        chunk = resp.read(64 * 1024)
-                        if not chunk:
-                            break
-                        out.write(chunk)
-                return {"saved_to": stream_to}
-            raw = resp.read()
-            if resp.status == 204 or not raw:
-                return None
-            ct = resp.headers.get("Content-Type", "")
-            if ct.startswith("application/json"):
-                return json.loads(raw.decode("utf-8"))
-            return raw.decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as e:
-        raw = e.read()
-        try:
-            parsed = json.loads(raw.decode("utf-8"))
-        except Exception:
-            parsed = raw.decode("utf-8", errors="replace")
-        raise TroveError(e.code, parsed, url) from None
-    except urllib.error.URLError as e:
-        raise SystemExit(
-            f"trove: cannot reach {url} ({e.reason}). "
-            f"Is the server running? Try: trove serve"
-        )
+    return _default_client.request(method, path, body=body,
+                                   stream_to=stream_to, timeout=timeout,
+                                   headers=_headers())
 
 
-def get(path: str, **kw):    return _request("GET", path, **kw)
-def post(path: str, body: dict | None = None, **kw): return _request("POST", path, body=body, **kw)
+def get(path: str, **kw):
+    return _request("GET", path, **kw)
+
+
+def post(path: str, body: dict | None = None, **kw):
+    return _request("POST", path, body=body, **kw)
 
 
 # ----- formatting -----------------------------------------------------
@@ -663,56 +639,39 @@ def _format_seconds(s: float) -> str:
 
 
 def cmd_events(args) -> int:
-    """Tail the SSE event stream. Press Ctrl-C to stop."""
-    qs = []
-    if args.max_events:
-        qs.append(f"max_events={int(args.max_events)}")
-    if args.interval is not None:
-        qs.append(f"interval={float(args.interval)}")
-    path = "/api/v1/events" + (("?" + "&".join(qs)) if qs else "")
-    url = _base_url() + path
-    req = urllib.request.Request(url, headers=_headers())
+    """Tail the SSE event stream. Press Ctrl-C to stop.
+
+    Delegates the actual HTTP / SSE-frame parsing to
+    ``TroveClient.stream_events`` — this command only owns terminal
+    rendering. ``_parse_sse`` is re-exported above for the existing
+    test_cli tests that import it directly.
+    """
     json_out = getattr(args, "json", False)
     try:
-        with urllib.request.urlopen(req, timeout=None) as resp:
-            buf = b""
-            for chunk in iter(lambda: resp.read(1024), b""):
-                buf += chunk
-                # SSE messages are separated by blank lines.
-                while b"\n\n" in buf:
-                    msg, buf = buf.split(b"\n\n", 1)
-                    payload = _parse_sse(msg.decode("utf-8", errors="replace"))
-                    if payload is None:
-                        continue
-                    if json_out:
-                        sys.stdout.write(json.dumps(payload) + "\n")
-                    else:
-                        ts = payload.get("ts", time.time())
-                        nj = len(payload.get("jobs") or [])
-                        nt = len(payload.get("transcripts") or [])
-                        print(f"[{time.strftime('%H:%M:%S', time.localtime(ts))}] "
-                              f"jobs={nj} transcripts={nt}")
-                    sys.stdout.flush()
+        for payload in _default_client.stream_events(
+            max_events=args.max_events or None,
+            interval=args.interval,
+        ):
+            if json_out:
+                sys.stdout.write(json.dumps(payload) + "\n")
+            else:
+                ts = payload.get("ts", time.time())
+                nj = len(payload.get("jobs") or [])
+                nt = len(payload.get("transcripts") or [])
+                print(f"[{time.strftime('%H:%M:%S', time.localtime(ts))}] "
+                      f"jobs={nj} transcripts={nt}")
+            sys.stdout.flush()
     except KeyboardInterrupt:
         return 130
     except urllib.error.URLError as e:
         print(f"trove: events stream closed ({e.reason})", file=sys.stderr)
         return 1
+    except SystemExit as e:
+        # stream_events raises SystemExit with the friendly "is the
+        # server running?" message on connection refused.
+        print(str(e), file=sys.stderr)
+        return 1
     return 0
-
-
-def _parse_sse(message: str) -> dict | None:
-    """Pull the JSON ``data:`` payload out of one SSE frame."""
-    data_lines = []
-    for line in message.splitlines():
-        if line.startswith("data:"):
-            data_lines.append(line[5:].lstrip())
-    if not data_lines:
-        return None
-    try:
-        return json.loads("\n".join(data_lines))
-    except ValueError:
-        return None
 
 
 # ----- argparse wiring ------------------------------------------------
