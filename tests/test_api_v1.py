@@ -38,6 +38,103 @@ def test_health_is_unauthenticated_and_ok(client):
     assert body["version"] == "v1"
 
 
+# ---- capabilities ---------------------------------------------------
+
+def test_capabilities_shape_and_unauthenticated(client, monkeypatch):
+    """The registry must be reachable without a token (clients use it
+    to *discover* whether auth is required) and must expose the keys
+    downstream callers branch on. Pin the contract — adding fields is
+    fine, removing or renaming is a wire-breaking change."""
+    # Ensure auth is off for this assertion path.
+    monkeypatch.delenv("TROVE_TOKEN", raising=False)
+    _, c = client
+    r = c.get("/api/v1/capabilities")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["api_version"] == "v1"
+    assert body["schema_version"] >= 2
+    assert body["auth_required"] is False
+    # Top-level shape contract.
+    for key in ("features", "formats", "scopes", "limits", "openapi_url"):
+        assert key in body, key
+    # Feature flags every client expects to see, regardless of value.
+    for f in ("diarization", "transcripts", "sse_events",
+              "idempotency_keys", "transcript_chunk", "transcript_search"):
+        assert f in body["features"], f
+    # Export formats == the ones /chunk + /export.<fmt> accept.
+    assert set(body["formats"]["transcript_export"]) == {"txt", "srt", "vtt", "json"}
+    # Scopes match safety.SCOPE_* — required so MCP/CLI can name them
+    # without re-importing the server module.
+    assert body["scopes"]["transcript_export"] == "transcript-export"
+    # Chunk caps are surfaced so callers can size their pagination
+    # loop without round-tripping a probe page first.
+    chunk = body["limits"]["transcript_chunk"]
+    assert chunk["text_default_bytes"] == 4000
+    assert chunk["text_max_bytes"] == 64000
+    assert chunk["json_default_segments"] == 50
+    assert chunk["json_max_segments"] == 500
+
+
+def test_capabilities_reflects_auth_required(client, monkeypatch):
+    """Setting ``TROVE_TOKEN`` must flip ``auth_required`` so a fresh
+    client knows to start sending Authorization headers — this is the
+    whole point of an unauthenticated capabilities probe."""
+    monkeypatch.setenv("TROVE_TOKEN", "secret-xyz")
+    _, c = client
+    body = c.get("/api/v1/capabilities").get_json()
+    assert body["auth_required"] is True
+    assert body["features"]["signed_urls"] is True
+
+
+def test_capabilities_reflects_live_runtime_objects(client):
+    """Architect P1 regression: limits MUST be sourced from the live
+    JobManager / RateLimiter / extensions dict, not from import-time
+    module globals. A per-process tweak (e.g. swapping the JobManager
+    worker count for a test) must show through to capability
+    consumers, otherwise automation reads stale limits and over-/
+    under-shoots them."""
+    app, c = client
+    # Mutate the live runtime objects (not env) and assert the
+    # registry reflects the change.
+    app.extensions["trove.jobs"].max_workers = 7
+    app.extensions["trove.jobs"].ttl_seconds = 1234
+    app.extensions["trove.rate_limiter"].rate = 99
+    app.extensions["trove.batch_max"] = 13
+
+    body = c.get("/api/v1/capabilities").get_json()
+    lim = body["limits"]
+    assert lim["max_workers"] == 7
+    assert lim["job_ttl_seconds"] == 1234
+    assert lim["rate_limit_per_minute"] == 99
+    assert lim["batch_max_urls"] == 13
+
+
+def test_capabilities_exposes_idempotency_policy(client):
+    """Operators wiring retry logic need the header name + TTL +
+    capacity surfaced explicitly so they don't have to read the
+    source to size their retry strategy."""
+    _, c = client
+    idem = c.get("/api/v1/capabilities").get_json()["idempotency"]
+    assert idem["header_name"] == "Idempotency-Key"
+    assert idem["ttl_seconds"] >= 60
+    assert idem["capacity"] >= 1
+
+
+def test_capabilities_reflects_diarization_flag(client, monkeypatch):
+    """``TROVE_DIARIZATION=on`` is the operator-facing toggle; a
+    capabilities consumer must see it flip without restarting."""
+    monkeypatch.setenv("TROVE_DIARIZATION", "off")
+    _, c = client
+    assert c.get("/api/v1/capabilities").get_json()["features"]["diarization"] is False
+    monkeypatch.setenv("TROVE_DIARIZATION", "on")
+    # Note: ``is_enabled()`` still returns False if heavy deps aren't
+    # installed in the test env — that's correct, the capability is
+    # gated on (flag AND deps).  We only assert the read path works
+    # and returns a bool (not e.g. None or an env string).
+    body = c.get("/api/v1/capabilities").get_json()
+    assert isinstance(body["features"]["diarization"], bool)
+
+
 # ---- jobs read ------------------------------------------------------
 
 def test_list_jobs_returns_list(client):

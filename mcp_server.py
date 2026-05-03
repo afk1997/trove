@@ -308,6 +308,20 @@ def _build_server():
             return body if isinstance(body, dict) else {"error": "unexpected_response"}
         return {"format": format, "content": body}
 
+    # ---- meta -------------------------------------------------------
+
+    @mcp.tool()
+    def server_capabilities() -> dict:
+        """Probe what the connected Trove server supports.
+
+        Returns the feature / limit / scope registry — useful for an
+        agent to decide whether diarization is available, what the
+        chunk-size caps are, whether the server requires a bearer
+        token, and which transcript export formats are supported.
+        Safe to call without authentication.
+        """
+        return _safe(lambda: _client.capabilities())
+
     # ---- models -----------------------------------------------------
 
     @mcp.tool()

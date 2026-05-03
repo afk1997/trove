@@ -39,7 +39,12 @@ def _fresh_v21() -> dict:
 # ----- migration backfill --------------------------------------------------
 
 def test_load_backfills_v21_defaults_on_old_v2(tmp_path):
-    """An old v2 file (no title/highlights/notes/reviewed) gets the new defaults."""
+    """An old v2 file (no title/highlights/notes/reviewed) gets the
+    new defaults *in memory*. Audit #13: ``load()`` is now a pure
+    read — disk persistence is the explicit job of ``migrate()``.
+    Callers reading the doc still see the back-filled v2.1 shape;
+    persistence happens at startup (``migrate_all``) or on the next
+    ``save()``."""
     p = tmp_path / "old.words.json"
     p.write_text(json.dumps({
         "schema_version": 2,
@@ -56,11 +61,15 @@ def test_load_backfills_v21_defaults_on_old_v2(tmp_path):
     assert data["highlights"] == []
     assert data["notes"] == []
     assert data["segments"][0]["reviewed"] is False
-    # backfill persisted to disk (re-read finds the new keys present)
+    # Pure read: disk is unchanged.
     on_disk = json.loads(p.read_text())
-    assert "title" in on_disk
-    assert "highlights" in on_disk
-    assert "notes" in on_disk
+    assert "title" not in on_disk
+
+    # Explicit migrate() is what persists the backfill.
+    assert transcript_io.migrate(str(p)) is True
+    on_disk = json.loads(p.read_text())
+    for key in ("title", "highlights", "notes"):
+        assert key in on_disk
     assert on_disk["segments"][0]["reviewed"] is False
 
 

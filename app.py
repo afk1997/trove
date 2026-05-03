@@ -84,6 +84,34 @@ def create_app() -> Flask:
     # inline counter and pre-flight check that mirror the server limit.
     app.jinja_env.globals["BATCH_MAX_URLS"] = BATCH_MAX_URLS
     app.extensions["trove.rate_limiter"] = rate_limiter
+    # Batch cap is exposed as an extension (in addition to the module
+    # global) so /api/v1/capabilities can read the live value rather
+    # than a stale import-time copy. ``app.py`` still owns the env-
+    # var default; tests can set ``app.extensions["trove.batch_max"]``
+    # to assert the registry reflects per-process tweaks.
+    app.extensions["trove.batch_max"] = BATCH_MAX_URLS
+
+    # One-shot migration sweep: persist any v1 .words.json files as v2
+    # at startup so individual GET handlers never have to mutate disk
+    # mid-request (which races concurrent writers and bumps mtime
+    # unexpectedly). transcript_io.load() is now pure — this sweep is
+    # the only place a read can trigger a write, and it runs exactly
+    # once per process boot. Errors per-file are swallowed inside
+    # migrate_all so one corrupt artifact can't block startup.
+    import transcript_io as _tio
+    _migrated, _skipped = _tio.migrate_all(str(download_dir))
+    if _migrated:
+        app.logger.info(
+            "transcript_io: migrated %d v1 transcript file(s) to v2 at startup",
+            _migrated,
+        )
+    for _name, _reason in _skipped:
+        # Surface skipped artifacts through the app logger (not stderr)
+        # so operators see them in normal log streams. Boot continues.
+        app.logger.warning(
+            "transcript_io: skipped %s during startup migration sweep: %s",
+            _name, _reason,
+        )
 
     transcribe_manager = transcribe_jobs.TranscribeJobManager(
         max_workers=1,
@@ -744,7 +772,9 @@ def create_app() -> Flask:
         if tj is None:
             return abort(404)
 
-        # transcript_io.load auto-migrates v1 files to v2 + writes a backup.
+        # transcript_io.load() is a pure read returning the canonical
+        # in-memory v2 dict. Startup migrate_all() handles cold v1
+        # files; this view never mutates disk on a GET.
         data = transcript_io.load(base + ".words.json")
 
         ext = os.path.splitext(parent.file_path)[1].lower()

@@ -137,6 +137,7 @@ def test_mcp_end_to_end(tmp_path):
         "list_models", "install_model", "model_install_progress",
         "set_active_model", "remove_model",
         "storage_info",
+        "server_capabilities",
     }
     assert set(result["tool_names"]) == expected_tools, result["tool_names"]
     assert "trove://transcript/{tid}" in result["templates"]

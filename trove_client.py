@@ -302,6 +302,16 @@ class TroveClient:
 
     # ----- models -----------------------------------------------------
 
+    def capabilities(self) -> dict:
+        """Fetch the server's feature / limit / scope registry.
+
+        Unauthenticated; safe to call before a token is configured.
+        Returns the JSON envelope from ``/api/v1/capabilities``
+        verbatim so callers can branch on ``auth_required``,
+        ``features.diarization``, ``limits.transcript_chunk.*``, etc.
+        """
+        return self.get("/api/v1/capabilities")
+
     def list_models(self) -> dict:                 return self.get("/api/v1/models")
     def install_model(self, name: str) -> dict:    return self.post(f"/api/v1/models/{name}/install")
     def model_install_progress(self) -> dict:      return self.get("/api/v1/models/install-progress")

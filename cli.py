@@ -55,6 +55,7 @@ MCP_TO_CLI: dict[str, str] = {
     "set_active_model":        "model-use",
     "remove_model":            "model-rm",
     "storage_info":            "du",
+    "server_capabilities":     "capabilities",
 }
 
 
@@ -627,6 +628,42 @@ def cmd_model_remove(args) -> int:
     return 0
 
 
+def cmd_capabilities(args) -> int:
+    """Print the server's feature / limit / scope registry.
+
+    Designed to be the first call a user (or a script) makes against
+    a new server: it tells you whether you need a token, whether
+    diarization is on, what the chunk caps are, etc.
+    """
+    rep = get("/api/v1/capabilities")
+    if getattr(args, "json", False):
+        _print_json(rep)
+        return 0
+    print(f"api_version:    {rep['api_version']}")
+    print(f"schema_version: {rep['schema_version']}")
+    print(f"auth_required:  {rep['auth_required']}")
+    feats = rep.get("features") or {}
+    on  = sorted(k for k, v in feats.items() if v)
+    off = sorted(k for k, v in feats.items() if not v)
+    print(f"features on:    {', '.join(on) or '(none)'}")
+    if off:
+        print(f"features off:   {', '.join(off)}")
+    fmts = (rep.get("formats") or {}).get("transcript_export") or []
+    print(f"transcript_export: {', '.join(fmts)}")
+    lim = rep.get("limits") or {}
+    print(f"rate_limit:     {lim.get('rate_limit_per_minute', 0)}/min")
+    print(f"max_workers:    {lim.get('max_workers')}")
+    print(f"batch_max_urls: {lim.get('batch_max_urls')}")
+    print(f"job_ttl:        {lim.get('job_ttl_seconds')}s")
+    chunk = lim.get("transcript_chunk") or {}
+    if chunk:
+        print(f"chunk caps:     {chunk.get('text_default_bytes')}/"
+              f"{chunk.get('text_max_bytes')} bytes (txt), "
+              f"{chunk.get('json_default_segments')}/"
+              f"{chunk.get('json_max_segments')} segs (json)")
+    return 0
+
+
 def cmd_du(args) -> int:
     """Disk-usage report — what's eating space in `downloads/`."""
     rep = get("/api/v1/storage")
@@ -816,6 +853,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = _sub("du", help="disk-usage report for the download directory")
     s.set_defaults(func=cmd_du)
+
+    s = _sub("capabilities",
+             help="show server feature / limit / scope registry (unauthenticated)")
+    s.set_defaults(func=cmd_capabilities)
 
     s = _sub("events", help="tail the SSE event stream")
     s.add_argument("--max-events", type=int, default=0,

@@ -28,8 +28,19 @@ Authority rule:
   re-derive paragraphs.
 
 Public API:
-- ``load(path)``  -> dict; auto-migrates v1 -> v2 on first read and writes
-  a one-shot ``<base>.words.v1.json`` backup next to the file.
+- ``load(path)``    -> dict; *pure* read. Returns the v2-shaped, fully
+  back-filled in-memory dict so callers always see the canonical schema,
+  but never touches the filesystem (no rewrite, no backup, no mtime
+  bump). Safe for GET handlers, tests, and read-mostly tooling.
+- ``migrate(path)`` -> bool; explicit *write* helper. Persists the v2
+  payload + a one-shot ``<base>.words.v1.json`` backup if (and only if)
+  the on-disk file is still v1 or missing v2.1 defaults. Returns True
+  iff anything was written. Idempotent on already-migrated files.
+- ``migrate_all(directory)`` -> int; bulk variant that walks every
+  ``*.words.json`` (skipping ``*.words.v1.json`` backups) under
+  ``directory`` and migrates each. Returns the count of files written.
+  Wired into ``create_app()`` startup so cold v1 files become v2 once,
+  rather than mutating disk on every read.
 - ``save(path, data)`` -> writes atomically via tempfile + ``os.replace``.
 
 Subsequent steps in the plan add ``apply_word_op``, ``apply_speaker``,
@@ -53,37 +64,101 @@ class WordOpError(ValueError):
 
 
 def load(path: str) -> dict:
-    """Read a transcript JSON file, migrating v1 to v2 in place if needed.
+    """Pure read of a transcript JSON file.
 
-    On a v1 file we:
-      1. Copy the original bytes to ``<base>.words.v1.json`` (skipped if the
-         backup already exists, so repeated loads stay idempotent).
-      2. Mutate the parsed dict to schema v2 (see ``_migrate_v1_to_v2``).
-      3. Atomically rewrite ``path`` with the v2 payload.
+    Always returns the v2-shaped, fully back-filled in-memory dict so
+    callers can rely on the canonical schema regardless of what's
+    actually on disk. Crucially: this function does **not** mutate
+    the filesystem — no rewrite, no backup, no mtime bump. A read
+    handler, a test, or any read-mostly tool can call ``load`` freely
+    without racing concurrent writers, surprising tests with mtime
+    changes, or holding a write lock for a GET request.
 
-    Already-v2 files are returned untouched.
+    To persist a stale on-disk file as v2, call ``migrate(path)``
+    explicitly (see module-level note). Write paths in the editor
+    naturally do this: they ``load(...)``, edit, then ``save(...)``,
+    which writes the v2 payload back regardless of what was on disk.
+    The startup sweep handles cold v1 files in bulk.
     """
     with open(path) as f:
         data = json.load(f)
 
     if data.get("schema_version") == SCHEMA_VERSION:
-        # v2 -> v2.1 backfill: the v3 redesign added optional title /
-        # highlights / notes / reviewed fields. Old v2 files lack them;
-        # patch them in on read so callers always see the full shape.
-        # Persisted lazily on the next save().
-        if _backfill_v21_defaults(data):
-            save(path, data)
+        # Backfill v2.1 defaults in-memory only — the on-disk file may
+        # still lack ``title`` / ``highlights`` / ``notes`` / per-segment
+        # ``reviewed``, but callers always see the full shape.
+        _backfill_v21_defaults(data)
         return data
 
-    # v1 file -> back up raw bytes once, then migrate + rewrite.
+    # v1 file: apply the v1->v2 migration in-memory and return the
+    # normalized dict. Persistence is the caller's job (migrate()).
+    _migrate_v1_to_v2(data)
+    return data
+
+
+def migrate(path: str) -> bool:
+    """Persist any pending migration / backfill for ``path`` on disk.
+
+    Returns True iff anything was written. Idempotent: a second call on
+    an already-v2 file with v2.1 defaults present is a no-op (no
+    rewrite, no mtime bump). On a v1 file:
+      1. Snapshot the original bytes to ``<base>.words.v1.json`` (the
+         backup is only ever written once — re-running on a partially
+         migrated tree is safe).
+      2. Mutate the parsed dict to schema v2 + v2.1 defaults.
+      3. Atomically rewrite ``path`` with the v2 payload.
+    """
+    with open(path) as f:
+        data = json.load(f)
+
+    if data.get("schema_version") == SCHEMA_VERSION:
+        # v2 already; only write if the v2.1 backfill changed anything.
+        changed = _backfill_v21_defaults(data)
+        if changed:
+            save(path, data)
+        return changed
+
+    # v1: back up raw bytes once, migrate, rewrite.
     backup_path = _v1_backup_path(path)
     if not os.path.exists(backup_path):
         # shutil.copy2 preserves metadata; both src + dst are the same FS.
         shutil.copy2(path, backup_path)
-
     _migrate_v1_to_v2(data)
     save(path, data)
-    return data
+    return True
+
+
+def migrate_all(directory: str) -> tuple[int, list[tuple[str, str]]]:
+    """Walk ``directory`` and migrate every ``*.words.json`` in place.
+
+    Returns ``(written_count, skipped)`` where ``skipped`` is a list of
+    ``(filename, reason)`` pairs for files that raised. Skips
+    ``*.words.v1.json`` backups by name. Errors on individual files are
+    swallowed (not raised) so one corrupt transcript can't block server
+    boot — self-hosting operators can still start the server even if a
+    single artifact has been hand-edited into invalid JSON. The caller
+    is expected to surface the skipped list through their logger so
+    operators can see what was bypassed.
+
+    Designed to be wired into application startup so cold v1 files
+    become v2 once, instead of every GET request mutating disk.
+    """
+    if not os.path.isdir(directory):
+        return 0, []
+    written = 0
+    skipped: list[tuple[str, str]] = []
+    for name in sorted(os.listdir(directory)):
+        if not name.endswith(".words.json"):
+            continue
+        if name.endswith(".words.v1.json"):
+            continue
+        full = os.path.join(directory, name)
+        try:
+            if migrate(full):
+                written += 1
+        except (OSError, json.JSONDecodeError, ValueError) as e:
+            skipped.append((name, f"{type(e).__name__}: {e}"))
+    return written, skipped
 
 
 def _backfill_v21_defaults(data: dict) -> bool:

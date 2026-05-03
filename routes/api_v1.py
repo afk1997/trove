@@ -396,6 +396,81 @@ def health():
     return jsonify({"ok": True, "version": "v1"})
 
 
+@api_v1_bp.get("/capabilities")
+def capabilities():
+    """Server feature / limit / scope registry.
+
+    Unauthenticated by design: clients (CLI, MCP, browser) need to be
+    able to probe ``auth_required`` *before* they have a token to
+    decide whether to prompt the user. The body is stable JSON shape;
+    new fields are added but never removed without an api-version
+    bump. A self-hosting operator can rely on this to wire automation
+    that adapts to the running server's actual config rather than
+    hard-coding env-var defaults.
+    """
+    import diarizer  # local import to avoid a top-level cycle on cold start.
+    import safety
+
+    auth_required = bool(os.environ.get("TROVE_TOKEN", "").strip())
+    # Read every limit off the *live* runtime objects rather than the
+    # ``app`` module's import-time globals. Architect P1: module
+    # globals are frozen at import time, so a per-process tweak (the
+    # JobManager being constructed with a different worker count for a
+    # test, or the BATCH_MAX_URLS extension being patched mid-run)
+    # would otherwise be invisible to capability consumers.
+    rl = current_app.extensions.get("trove.rate_limiter")
+    jm = current_app.extensions.get("trove.jobs")
+    batch_max = current_app.extensions.get("trove.batch_max", 0)
+    return jsonify({
+        "api_version":    "v1",
+        "schema_version": transcript_io.SCHEMA_VERSION,
+        "auth_required":  auth_required,
+        "features": {
+            # ``available()`` is True iff the flag is on AND the heavy
+            # deps are importable — matches what the pipeline will
+            # actually try to do at transcribe time.
+            "diarization":       diarizer.available(),
+            "transcripts":       True,
+            "sse_events":        True,
+            "idempotency_keys":  True,
+            "signed_urls":       auth_required,
+            "transcript_chunk":  True,
+            "transcript_search": True,
+        },
+        "formats": {
+            "transcript_export": ["txt", "srt", "vtt", "json"],
+        },
+        "scopes": {
+            "media":             safety.SCOPE_MEDIA,
+            "transcript_view":   safety.SCOPE_TRANSCRIPT_VIEW,
+            "transcript_export": safety.SCOPE_TRANSCRIPT_EXPORT,
+        },
+        "limits": {
+            "rate_limit_per_minute": int(getattr(rl, "rate", 0) or 0),
+            "rate_limit_window_sec": int(getattr(rl, "per_seconds", 60) or 60),
+            "max_workers":           int(getattr(jm, "max_workers", 0) or 0),
+            "job_ttl_seconds":       int(getattr(jm, "ttl_seconds", 0) or 0),
+            "batch_max_urls":        int(batch_max or 0),
+            "transcript_chunk": {
+                "text_default_bytes":    _CHUNK_TEXT_DEFAULT_LIMIT,
+                "text_max_bytes":        _CHUNK_TEXT_MAX_LIMIT,
+                "json_default_segments": _CHUNK_JSON_DEFAULT_LIMIT,
+                "json_max_segments":     _CHUNK_JSON_MAX_LIMIT,
+            },
+        },
+        # Idempotency policy is surfaced so automation can size its
+        # retry window and pick a key strategy without reading the
+        # source — required for clients that want to safely retry a
+        # POST /jobs submission across a network blip.
+        "idempotency": {
+            "header_name":  "Idempotency-Key",
+            "ttl_seconds":  _IDEMPOTENCY_TTL_SECONDS,
+            "capacity":     _IDEMPOTENCY_CAPACITY,
+        },
+        "openapi_url": "/api/v1/openapi.json",
+    })
+
+
 # ----- jobs -----------------------------------------------------------
 
 @api_v1_bp.get("/jobs")
@@ -882,7 +957,9 @@ def chunk_transcript(tid):
     if fmt == "json":
         # Segment-range slicing. Loading the whole .words.json is fine
         # — even an hour-long transcript is well under a megabyte and
-        # transcript_io.load() handles v1->v2 migration for free.
+        # transcript_io.load() returns the canonical in-memory v2 dict
+        # regardless of what's on disk; the startup migrate_all() sweep
+        # is what persists cold v1 files. This GET handler stays read-only.
         data = transcript_io.load(path)
         segments = list(data.get("segments") or [])
         all_words = list(data.get("words") or [])
@@ -1162,6 +1239,7 @@ _OPENAPI_DOC = {
     "servers": [{"url": "/api/v1"}],
     "paths": {
         "/health":             {"get":  {"summary": "Liveness probe"}},
+        "/capabilities":       {"get":  {"summary": "Server feature / limit / scope registry (unauthenticated)"}},
         "/jobs":               {
             "get":  {"summary": "List download jobs (paginated, filterable)",
                       "parameters": [
