@@ -160,12 +160,29 @@ def test_split_with_bad_seg_idx_raises():
         transcript_io.split_segment_at_word(data, 99, after_word_idx=0)
 
 
-def test_split_new_right_half_unreviewed_even_if_left_reviewed():
+def test_split_invalidates_review_on_both_halves():
+    """Splitting a reviewed segment must clear ``reviewed`` on BOTH halves.
+
+    Product rule (Option A): splitting restructures content, so any prior
+    human sign-off no longer applies — the user re-reviews each half.
+    The previous behavior left the left half ``reviewed=True`` while the
+    right half was ``False``, which is internally inconsistent.
+    """
     data = _fresh_v21()
     data["segments"][0]["reviewed"] = True
     transcript_io.split_segment_at_word(data, 0, after_word_idx=1)
-    # Left half keeps reviewed; right is fresh.
-    assert data["segments"][0]["reviewed"] is True
+    assert data["segments"][0]["reviewed"] is False
+    assert data["segments"][1]["reviewed"] is False
+
+
+def test_split_unreviewed_segment_stays_unreviewed_on_both_halves():
+    """Defensive: splitting a never-reviewed segment must keep both
+    halves ``reviewed=False`` (i.e. the invalidation logic doesn't
+    accidentally flip the default to True for fresh segments)."""
+    data = _fresh_v21()
+    assert data["segments"][0]["reviewed"] is False
+    transcript_io.split_segment_at_word(data, 0, after_word_idx=1)
+    assert data["segments"][0]["reviewed"] is False
     assert data["segments"][1]["reviewed"] is False
 
 

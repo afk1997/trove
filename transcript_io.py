@@ -609,10 +609,16 @@ def set_title(data: dict, title: str | None) -> str | None:
 def split_segment_at_word(data: dict, seg_idx: int, after_word_idx: int) -> tuple[int, int]:
     """Split ``segments[seg_idx]`` so that ``after_word_idx`` ends the first half.
 
-    The new (right) segment inherits the original speaker + reviewed flag and
-    its ``start`` time is derived from its first word's ``start``. The left
-    half keeps the same ``seg_idx``; the right half is inserted at
-    ``seg_idx + 1`` and shifts every following segment's index by +1.
+    The new (right) segment inherits the original speaker; its ``start`` time
+    is derived from its first word's ``start``. The left half keeps the same
+    ``seg_idx``; the right half is inserted at ``seg_idx + 1`` and shifts
+    every following segment's index by +1.
+
+    **Review state is invalidated on split.** Both halves are marked
+    ``reviewed=False`` regardless of the original value, because splitting
+    a paragraph restructures its content and the human reviewer no longer
+    has eyes on the new boundary. The user can re-mark either half as
+    reviewed if they wish.
 
     Returns ``(left_idx, right_idx)``.
 
@@ -661,6 +667,9 @@ def split_segment_at_word(data: dict, seg_idx: int, after_word_idx: int) -> tupl
     seg["start"] = left_start
     seg["end"] = left_end
     seg["text"] = render_segment_text(seg, words)
+    # Splitting restructures content, so any prior human review on the
+    # original segment no longer applies to either half. See docstring.
+    seg["reviewed"] = False
 
     new_seg = {
         "start": right_start,
@@ -668,7 +677,7 @@ def split_segment_at_word(data: dict, seg_idx: int, after_word_idx: int) -> tupl
         "text": "",
         "word_idxs": right_ids,
         "speaker": seg.get("speaker"),
-        "reviewed": False,  # split halves start unreviewed; user re-marks if desired
+        "reviewed": False,  # see docstring: split invalidates review on both halves
     }
     new_seg["text"] = render_segment_text(new_seg, words)
     segments.insert(seg_idx + 1, new_seg)
