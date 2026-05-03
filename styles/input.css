@@ -304,6 +304,11 @@
     margin-right: 8px;
   }
   .hero-ticker-link:hover { color: var(--orange); }
+  .hero-ticker-link:focus-visible {
+    outline: 2px dashed var(--orange);
+    outline-offset: 3px;
+    color: var(--orange);
+  }
 
   .hero-corner-stamp {
     position: absolute;

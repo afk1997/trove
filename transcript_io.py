@@ -339,27 +339,46 @@ def regenerate_artifacts(data: dict, base_path: str) -> None:
         text = render_segment_text(seg, data.get("words") or [])
         rendered.append((float(seg.get("start", 0.0)), float(seg.get("end", 0.0)), text))
 
+    def _atomic_write(path: str, body: str) -> None:
+        # Mirror the tempfile + os.replace pattern used by save() so that
+        # a concurrent export GET landing mid-write never reads a torn
+        # file, and a crash mid-write leaves the prior version intact.
+        parent = os.path.dirname(path) or "."
+        fd, tmp = tempfile.mkstemp(prefix=".tio.", dir=parent)
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(body)
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
     txt = "\n\n".join(t for _, _, t in rendered if t)
-    with open(base_path + ".txt", "w") as f:
-        f.write(txt + ("\n" if txt and not txt.endswith("\n") else ""))
+    txt_body = txt + ("\n" if txt and not txt.endswith("\n") else "")
+    _atomic_write(base_path + ".txt", txt_body)
 
-    with open(base_path + ".srt", "w") as f:
-        n = 0
-        for start, end, text in rendered:
-            if not text:
-                continue
-            n += 1
-            f.write(f"{n}\n")
-            f.write(f"{_format_timestamp(start, srt=True)} --> {_format_timestamp(end, srt=True)}\n")
-            f.write(text + "\n\n")
+    srt_parts: list[str] = []
+    n = 0
+    for start, end, text in rendered:
+        if not text:
+            continue
+        n += 1
+        srt_parts.append(
+            f"{n}\n{_format_timestamp(start, srt=True)} --> {_format_timestamp(end, srt=True)}\n{text}\n\n"
+        )
+    _atomic_write(base_path + ".srt", "".join(srt_parts))
 
-    with open(base_path + ".vtt", "w") as f:
-        f.write("WEBVTT\n\n")
-        for start, end, text in rendered:
-            if not text:
-                continue
-            f.write(f"{_format_timestamp(start, srt=False)} --> {_format_timestamp(end, srt=False)}\n")
-            f.write(text + "\n\n")
+    vtt_parts: list[str] = ["WEBVTT\n\n"]
+    for start, end, text in rendered:
+        if not text:
+            continue
+        vtt_parts.append(
+            f"{_format_timestamp(start, srt=False)} --> {_format_timestamp(end, srt=False)}\n{text}\n\n"
+        )
+    _atomic_write(base_path + ".vtt", "".join(vtt_parts))
 
 
 # ---------------------------------------------------------------------------
