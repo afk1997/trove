@@ -133,6 +133,35 @@ def test_auto_k_detects_two_clusters():
     assert k == 2
 
 
+def test_auto_k_does_not_over_count_for_within_speaker_variation():
+    """A single real speaker has natural pitch/volume variation across
+    chunks. The encoder produces SLIGHTLY different embeddings per chunk
+    even from the same person — auto_k must NOT split that into 3+
+    clusters. Real-world over-counting (one ESL clip showed 6 phantom
+    speakers for what was clearly 2 speakers) was the trigger for the
+    25%-improvement threshold."""
+    pytest.importorskip("sklearn")
+    import numpy as np
+    d = _fresh_diarizer()
+    rng = np.random.RandomState(42)
+    # 8 embeddings, all 'same speaker' with small per-chunk noise.
+    base = np.array([0.5, 0.3, -0.2, 0.1, 0.4, -0.3, 0.2, -0.1])
+    embs = np.array([base + rng.normal(0, 0.05, len(base)) for _ in range(8)])
+    k = d._auto_k(embs)
+    assert k == 1, f"single speaker (within-speaker noise) shouldn't split into k={k}"
+
+
+def test_auto_k_caps_at_default_max_k():
+    """Even with 8 well-separated clusters, default max_k=4 must hold."""
+    pytest.importorskip("sklearn")
+    import numpy as np
+    d = _fresh_diarizer()
+    # 8 chunks each anchored to a distinct unit-vector direction
+    points = np.eye(8)
+    k = d._auto_k(points)
+    assert k <= 4, f"default max_k=4 must hold; got k={k}"
+
+
 def test_within_cluster_dist_is_zero_for_identical_points():
     pytest.importorskip("sklearn")
     import numpy as np

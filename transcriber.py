@@ -309,8 +309,18 @@ def apply_speakers(result: "TranscriptResult", chunks: list) -> None:
 
     Each word in ``result.words`` is tagged with the speaker of the
     diarization chunk whose [start, end) interval contains the word's
-    start time. Then segments are rebuilt so that a paragraph break is
-    produced on EITHER a speaker change OR the existing pause-gap rule.
+    start time. Words that fall OUTSIDE any chunk (whisper detected speech
+    where silero-vad didn't, e.g. a brief greeting or a one-word bridge in
+    a tiny gap) inherit the speaker of their nearest assigned neighbor:
+    forward-fill from the previous assigned word, with leading orphans
+    backward-filled from the first assigned word.
+
+    Without that fill step, every orphan word creates its own ``speaker=None``
+    segment, fragmenting a single-speaker transcript into a mosaic of
+    1-word "None" paragraphs interleaved with the real speaker's content.
+
+    Then segments are rebuilt so that a paragraph break is produced on
+    EITHER a speaker change OR the existing pause-gap rule.
 
     ``chunks`` items must have ``.start``, ``.end``, ``.speaker`` attrs
     (e.g. ``diarizer.SpeakerChunk``). No-op when chunks is empty.
@@ -328,6 +338,29 @@ def apply_speakers(result: "TranscriptResult", chunks: list) -> None:
             if c.start > ws:
                 break
         w["speaker"] = spk
+
+    # Pass 2: forward-fill None speakers from the previous assigned word.
+    last_spk = None
+    for w in result.words:
+        if w.get("speaker") is not None:
+            last_spk = w["speaker"]
+        elif last_spk is not None:
+            w["speaker"] = last_spk
+
+    # Pass 3: backward-fill any leading orphans (words that came before
+    # ANY assigned word) from the first speaker we ever saw.
+    first_spk = None
+    for w in result.words:
+        s = w.get("speaker")
+        if s is not None:
+            first_spk = s
+            break
+    if first_spk is not None:
+        for w in result.words:
+            if w.get("speaker") is None:
+                w["speaker"] = first_spk
+            else:
+                break
 
     new_segs: list[dict] = []
     current = [result.words[0]]
