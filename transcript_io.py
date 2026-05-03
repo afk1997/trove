@@ -188,6 +188,84 @@ def _migrate_v1_to_v2(data: dict) -> None:
 _WORD_OPS = ("set_text", "delete", "insert_after", "merge_next")
 
 
+# Punctuation that should hug the previous word (no leading space).
+# Whisper sometimes emits these as standalone tokens; naive
+# `" ".join(words)` would produce "hello ." instead of "hello.".
+_RIGHT_HUGS_LEFT = frozenset({
+    ".", ",", "!", "?", ":", ";", "%", ")", "]", "}",
+    "'s", "n't", "'re", "'ll", "'ve", "'d", "'m",
+    "…", "”", "’", "»",
+})
+
+# Punctuation that should hug the following word (no trailing space).
+_LEFT_HUGS_RIGHT = frozenset({
+    "(", "[", "{", "$", "#", "@",
+    "“", "‘", "«",
+})
+
+
+def join_word_text(left: str, right: str) -> str:
+    """Concatenate two transcript word tokens with the right whitespace.
+
+    Single source of truth for how transcript words combine. Used by
+    every site that joins / merges word text so display, export, and
+    structural edits all agree.
+
+    Rules:
+      * Empty operand → return the other (no leading/trailing space).
+      * If `right` is closing punctuation (.,!?:;%)]}, possessive 's,
+        contractions n't/'re/'ll/'ve/'d/'m, ellipsis, closing quote)
+        → glue with no space:   "hello" + "."     -> "hello."
+      * If `left` is opening punctuation (([{$#@, opening quote)
+        → glue with no space:   "$"     + "100"   -> "$100"
+      * Otherwise insert a single space: "hello" + "world" -> "hello world".
+
+    This intentionally does NOT try to be a full natural-language joiner
+    (it won't undo Whisper's existing inline punctuation, won't handle
+    em-dashes, won't fix contractions whisper already glued). It just
+    avoids the obvious "helloworld" / "hello ." failure modes when
+    standalone tokens get joined.
+    """
+    if not left:
+        return right
+    if not right:
+        return left
+    if right in _RIGHT_HUGS_LEFT:
+        return left + right
+    if left in _LEFT_HUGS_RIGHT:
+        return left + right
+    return left + " " + right
+
+
+def _join_word_tokens(tokens) -> str:
+    """Reduce an iterable of word strings via :func:`join_word_text`.
+
+    Skips empty strings so deleted/blank words don't introduce double
+    spaces. Returns the empty string for an empty input.
+
+    Implementation note: we track the *previous raw token* separately
+    from the running accumulator so the "$" + "100" -> "$100" rule
+    fires on the previous token's identity, not on whether the whole
+    accumulator happens to end with "$".
+    """
+    out = ""
+    prev = ""
+    for t in tokens:
+        if not t:
+            continue
+        if not out:
+            out = t
+        else:
+            # Use prev (the last raw token) as the left operand so the
+            # opening-punctuation check matches the token, not a tail
+            # substring of the accumulator. Then splice the joined pair
+            # back onto the accumulator (minus prev, which was its tail).
+            joined = join_word_text(prev, t)
+            out = out[: len(out) - len(prev)] + joined
+        prev = t
+    return out
+
+
 def apply_word_op(data: dict, idx: int, op: str, **kw) -> dict:
     """Apply ``op`` to the word at ``idx`` in-place; return that word's dict.
 
@@ -260,7 +338,7 @@ def apply_word_op(data: dict, idx: int, op: str, **kw) -> dict:
         if next_idx is None:
             raise WordOpError(f"word {idx} has no following word to merge")
         peer = words[next_idx]
-        anchor["w"] = f"{anchor.get('w', '')}{peer.get('w', '')}"
+        anchor["w"] = join_word_text(anchor.get("w", ""), peer.get("w", ""))
         anchor["end"] = peer.get("end", anchor.get("end", 0.0))
         anchor["edited"] = anchor["w"] != anchor.get("original_w", "")
         peer["deleted"] = True
@@ -315,15 +393,14 @@ def _next_visible_in_segment(seg: dict, words: list, idx: int) -> int | None:
 def render_segment_text(seg: dict, words: list) -> str:
     """Join the visible (non-deleted) words for a segment into display text.
 
-    Whisper emits punctuation glued to the preceding token (e.g. ``"world."``
-    or ``" ,"``) so we just space-join: that mirrors what the on-screen
-    renderer shows and what the v1 .txt export contained.
+    Uses :func:`join_word_text` so standalone punctuation tokens
+    (".", ",", "$", "(", …) compose without spurious whitespace.
     """
     parts = []
     for i in seg.get("word_idxs", []):
         if 0 <= i < len(words) and not words[i].get("deleted"):
             parts.append(words[i].get("w", ""))
-    return " ".join(parts).strip()
+    return _join_word_tokens(parts).strip()
 
 
 def regenerate_artifacts(data: dict, base_path: str) -> None:

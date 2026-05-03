@@ -166,14 +166,14 @@ def test_merge_next_returns_anchor_plus_oob_peer(client, tmp_path):
     body = res.data.decode()
     # Anchor span is the primary swap (no oob attribute).
     assert 'data-idx="0"' in body
-    assert "helloworld" in body
+    assert "hello world" in body
     # Peer span is OOB so the deleted state is reflected immediately.
     assert 'data-idx="1"' in body
     assert 'hx-swap-oob="outerHTML"' in body
     assert "is-deleted" in body
 
     on_disk = json.loads(open(base + ".words.json").read())
-    assert on_disk["words"][0]["w"] == "helloworld"
+    assert on_disk["words"][0]["w"] == "hello world"
     assert on_disk["words"][1]["deleted"] is True
 
 

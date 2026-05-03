@@ -243,14 +243,14 @@ def test_full_edit_cycle_persists_and_regenerates_exports(client, tmp_path):
     page = client.get("/transcript/t_e2e")
     assert page.status_code == 200
     html = page.data.decode()
-    assert "THEquick" in html
+    assert "THE quick" in html
     assert "FOX" in html
     assert "Alice" in html
     assert "marker" in html
 
     # On-disk state survives.
     on_disk = json.loads(open(base + ".words.json").read())
-    assert on_disk["words"][0]["w"] == "THEquick"  # set_text + merge with inserted "quick"
+    assert on_disk["words"][0]["w"] == "THE quick"  # set_text + merge with inserted "quick"
     assert on_disk["words"][1]["w"] == "FOX"
     assert on_disk["words"][4]["deleted"] is True
     assert on_disk["words"][5]["deleted"] is True  # merged-into-anchor peer

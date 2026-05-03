@@ -331,6 +331,14 @@ def _build_server():
             return f"(error: {body['error']})"
         return body if isinstance(body, str) else str(body)
 
+    @mcp.resource("trove://transcripts/{tid}.txt")
+    def transcript_txt_alias_resource(tid: str) -> str:
+        """Alias of ``trove://transcript/{tid}/text`` using the
+        plural-collection / file-suffix URI shape that mirrors the
+        public REST path (``/transcripts/<id>/export.txt``). Both URIs
+        are kept so existing MCP clients keep working."""
+        return transcript_text_resource(tid)
+
     @mcp.resource("trove://storage")
     def storage_resource() -> str:
         import json as _json

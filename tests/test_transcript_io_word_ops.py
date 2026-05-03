@@ -106,7 +106,7 @@ def test_insert_after_invalid_idx_raises():
 def test_merge_next_absorbs_text_and_end():
     data = _fresh_v2()
     out = transcript_io.apply_word_op(data, 0, "merge_next")
-    assert out["w"] == "helloworld"
+    assert out["w"] == "hello world"
     assert out["end"] == pytest.approx(0.91)
     assert out["edited"] is True
     assert data["words"][1]["deleted"] is True
@@ -119,7 +119,7 @@ def test_merge_next_skips_deleted_peer():
     transcript_io.apply_word_op(data, 0, "insert_after", w="X")
     transcript_io.apply_word_op(data, 1, "delete")
     out = transcript_io.apply_word_op(data, 0, "merge_next")
-    assert out["w"] == "helloX"
+    assert out["w"] == "hello X"
 
 
 def test_merge_next_at_segment_tail_raises():

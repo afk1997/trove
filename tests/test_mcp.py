@@ -106,6 +106,14 @@ async def _drive_mcp(port: int) -> dict:
 
             jobs_res = await session.read_resource("trove://jobs")
             out["jobs_resource"] = jobs_res.contents[0].text
+
+            # Read the alias and the legacy text resource for the same
+            # bogus tid; both should produce identical (error) payloads
+            # so MCP clients can choose either URI shape interchangeably.
+            legacy = await session.read_resource("trove://transcript/nope/text")
+            alias  = await session.read_resource("trove://transcripts/nope.txt")
+            out["txt_legacy"] = legacy.contents[0].text
+            out["txt_alias"]  = alias.contents[0].text
     return out
 
 
@@ -132,6 +140,13 @@ def test_mcp_end_to_end(tmp_path):
     }
     assert set(result["tool_names"]) == expected_tools, result["tool_names"]
     assert "trove://transcript/{tid}" in result["templates"]
+    # New plural/.txt alias must be advertised alongside the legacy URI
+    # so MCP clients can address per-transcript text via the REST-shaped
+    # path ``trove://transcripts/<id>.txt``.
+    assert "trove://transcripts/{tid}.txt" in result["templates"]
+    # Alias must produce byte-identical output to the legacy URI so
+    # downgrading clients keeps working.
+    assert result["txt_alias"] == result["txt_legacy"]
 
     # Success surface
     assert "jobs" in result["list_jobs"]

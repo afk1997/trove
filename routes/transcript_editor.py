@@ -493,7 +493,9 @@ def export_selection(transcribe_id):
             if not ids:
                 continue
             ts = transcript_io._format_timestamp(float(seg.get("start", 0.0)), srt=False)
-            text = " ".join(words[j].get("w", "") for j in ids).strip()
+            text = transcript_io._join_word_tokens(
+                words[j].get("w", "") for j in ids
+            ).strip()
             if text:
                 chunks.append(f"[{ts}] {text}")
         body = "\n\n".join(chunks) + ("\n" if chunks else "")
