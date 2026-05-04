@@ -106,17 +106,29 @@ def available() -> bool:
 
 def diarize(*, audio_path: str,
             expected_speakers: int | None = None) -> list[SpeakerChunk]:
-    """Run VAD + embedding + clustering on a 16k mono WAV.
+    """Run VAD + continuous-window embedding + clustering on a 16k mono WAV.
+
+    Pipeline (the v2 chunk-per-VAD-region approach lumped multi-speaker
+    audio into a single embedding and produced near-random labels for any
+    chunk that contained more than one speaker):
+
+      1. silero-vad picks out speech regions.
+      2. Within each region, slide overlapping 1.6 s windows and embed
+         each one separately (Resemblyzer's ``embed_utterance(return_partials=True)``).
+      3. Cluster the partials with Ward + Euclidean — empirically far less
+         skewed than cosine + average on partial embeddings (where one
+         dominant speaker would otherwise eat 90% of the labels).
+      4. Median-filter the labels so a single anomalous window doesn't
+         create a one-second phantom speaker.
+      5. Merge consecutive same-label partials into ``SpeakerChunk`` runs.
 
     Args:
-        audio_path: path to a 16kHz mono WAV (the same one ``transcriber``
-            already produces).
-        expected_speakers: if set (1..6), force k. Otherwise we auto-detect
-            via gap statistic.
+        audio_path: path to a 16kHz mono WAV.
+        expected_speakers: if set (1..6), force k. Otherwise auto-detect.
 
     Returns:
-        Speaker chunks sorted by start time. Empty list when there's no
-        speech detected.
+        Speaker chunks sorted by start time. Empty when no speech was
+        detected or there wasn't enough audio for reliable clustering.
 
     Raises:
         DiarizationUnavailable: when deps aren't installed or flag is off.
@@ -125,29 +137,48 @@ def diarize(*, audio_path: str,
         raise DiarizationUnavailable(
             "TROVE_DIARIZATION is off (set TROVE_DIARIZATION=on to enable)"
         )
-    chunks = _vad_speech_chunks(audio_path)
-    if not chunks:
+    speech = _vad_speech_chunks(audio_path)
+    if not speech:
         return []
-    kept_chunks, embeddings = _embed_chunks(audio_path, chunks)
-    if len(embeddings) == 0:
-        return []
+    times, embeddings = _continuous_embeddings(audio_path, speech)
+    if len(embeddings) < 2:
+        # One or zero embeddings — nothing to cluster. Fall back to a
+        # single SpeakerChunk covering the whole speech span.
+        if not times:
+            return []
+        return [SpeakerChunk(start=float(times[0][0]),
+                             end=float(times[-1][1]),
+                             speaker="Speaker 1")]
+
     if expected_speakers is None:
-        n_speakers = _auto_k(embeddings)
+        k = _auto_k_partials(embeddings)
     else:
-        n_speakers = max(1, min(6, int(expected_speakers)))
-    labels = _cluster(embeddings, n_speakers)
-    # IMPORTANT: label the chunks that actually got embedded — short chunks
-    # were filtered out by _embed_chunks, so a naive `chunks[:len(embeddings)]`
-    # would misalign every label after the first skipped chunk.
-    out: list[SpeakerChunk] = []
-    for c, lbl in zip(kept_chunks, labels):
-        out.append(SpeakerChunk(
-            start=float(c["start"]),
-            end=float(c["end"]),
-            speaker=f"Speaker {int(lbl) + 1}",
-        ))
-    out.sort(key=lambda x: x.start)
-    return out
+        k = max(1, min(6, int(expected_speakers)))
+
+    if k <= 1:
+        return [SpeakerChunk(start=float(times[0][0]),
+                             end=float(times[-1][1]),
+                             speaker="Speaker 1")]
+
+    labels = _cluster_partials(embeddings, k)
+    labels = _smooth_labels(labels, window=9)
+
+    runs: list[SpeakerChunk] = []
+    cur_s, cur_e, cur_l = times[0][0], times[0][1], labels[0]
+    for (s, e), lbl in zip(times[1:], labels[1:]):
+        if lbl == cur_l:
+            cur_e = max(cur_e, e)
+        else:
+            runs.append(SpeakerChunk(
+                start=float(cur_s), end=float(cur_e),
+                speaker=f"Speaker {int(cur_l) + 1}",
+            ))
+            cur_s, cur_e, cur_l = s, e, lbl
+    runs.append(SpeakerChunk(
+        start=float(cur_s), end=float(cur_e),
+        speaker=f"Speaker {int(cur_l) + 1}",
+    ))
+    return runs
 
 
 # ----------------------------------------------------------------------
@@ -307,6 +338,161 @@ def _auto_k(embeddings, max_k: int = 4) -> int:
             break
         best_k = k
     return best_k
+
+
+def _continuous_embeddings(audio_path: str, speech_regions: list[dict]):
+    """Slide overlapping 1.6 s windows across each speech region and embed
+    each one. Returns ``(times, embeddings)`` where ``times[i]`` is the
+    ``(start, end)`` interval of the i-th partial (in original-audio seconds)
+    and ``embeddings[i]`` is its 256-d Resemblyzer embedding.
+
+    This is the v3 path: instead of one embedding per VAD region (which
+    smears multi-speaker audio into a single point), we compute many
+    finer-grained embeddings so a speaker change inside one VAD region
+    is still resolvable downstream.
+    """
+    try:
+        from resemblyzer.audio import (
+            normalize_volume,
+            audio_norm_target_dBFS,
+            sampling_rate as _RES_SR,
+        )
+        import librosa
+        import numpy as np
+    except Exception as e:
+        raise DiarizationUnavailable(f"resemblyzer not installed: {e}") from e
+    encoder = _get_encoder()
+    wav, source_sr = librosa.load(audio_path, sr=None)
+    if source_sr != _RES_SR:
+        wav = librosa.resample(wav, orig_sr=source_sr, target_sr=_RES_SR)
+    wav = normalize_volume(wav, audio_norm_target_dBFS, increase_only=True)
+    sr = _RES_SR
+
+    # 1.6 s is the partial-utterance length baked into Resemblyzer's
+    # encoder. A region shorter than that can't produce overlapping
+    # partials; we skip it (the speaker is still labeled by neighboring
+    # partials via apply_speakers' forward/backward fill).
+    PARTIAL_DURATION = 1.6
+    PARTIALS_PER_SEC = 4  # rate=4 → ~250ms steps between partials
+
+    times: list[tuple[float, float]] = []
+    embeddings = []
+    for region in speech_regions:
+        rs = float(region["start"])
+        re = float(region["end"])
+        if re - rs < PARTIAL_DURATION:
+            continue
+        s = int(rs * sr)
+        e = int(re * sr)
+        seg = wav[s:e]
+        if len(seg) < int(sr * PARTIAL_DURATION):
+            continue
+        try:
+            _, partials, splits = encoder.embed_utterance(
+                seg, return_partials=True, rate=PARTIALS_PER_SEC,
+            )
+        except Exception:
+            # Fall back to a single embedding for this region.
+            embeddings.append(encoder.embed_utterance(seg))
+            times.append((rs, re))
+            continue
+        for p_idx, slc in enumerate(splits):
+            p_start = rs + slc.start / sr
+            p_end = rs + slc.stop / sr
+            embeddings.append(partials[p_idx])
+            times.append((p_start, p_end))
+
+    if not embeddings:
+        return [], np.zeros((0, 256))
+    return times, np.array(embeddings)
+
+
+def _smooth_labels(labels, window: int = 9):
+    """Median-filter cluster labels to suppress single-window flips.
+
+    A speaker change that lasts only one or two partials (~0.5 s) is
+    almost certainly noise — Resemblyzer momentarily latched onto a
+    breath, a laugh, or a short interjection. Replacing each label
+    with the mode of its ``window``-wide neighborhood makes the runs
+    more readable without losing real turn-taking that lasts ≥1 s.
+    """
+    import numpy as np
+    arr = np.asarray(labels)
+    if len(arr) == 0:
+        return arr
+    out = np.array(arr, copy=True)
+    half = window // 2
+    for i in range(len(arr)):
+        lo = max(0, i - half)
+        hi = min(len(arr), i + half + 1)
+        vals, counts = np.unique(arr[lo:hi], return_counts=True)
+        out[i] = vals[int(counts.argmax())]
+    return out
+
+
+def _cluster_partials(embeddings, k: int):
+    """Cluster partial embeddings with Ward + Euclidean.
+
+    Cosine + average linkage (used by ``_cluster``) is appropriate for
+    a small number of long-utterance embeddings, but on hundreds of
+    partials it produces near-singleton clusters: one big bucket and
+    a sliver. Ward + Euclidean produces balanced clusters that map
+    closely to actual speaker share-of-voice.
+    """
+    try:
+        from sklearn.cluster import AgglomerativeClustering
+    except Exception as e:
+        raise DiarizationUnavailable(f"scikit-learn not installed: {e}") from e
+    n = len(embeddings)
+    if n == 0:
+        return []
+    if n == 1 or k <= 1:
+        return [0] * n
+    k = min(k, n)
+    clf = AgglomerativeClustering(
+        n_clusters=k,
+        metric="euclidean",
+        linkage="ward",
+    )
+    return list(clf.fit_predict(embeddings))
+
+
+def _auto_k_partials(embeddings, max_k: int = 4) -> int:
+    """Choose k for partial embeddings via silhouette + cluster-share guard.
+
+    Pick the k in 2..max_k that maximizes silhouette score, but reject
+    any k where the smallest cluster is < 5% of the partials — that's
+    a sliver from a single speaker, not a real second voice. Falls
+    back to k=1 if the best silhouette doesn't clear a small structure
+    threshold (0.10).
+    """
+    try:
+        import numpy as np
+        from sklearn.cluster import AgglomerativeClustering
+        from sklearn.metrics import silhouette_score
+    except Exception as e:
+        raise DiarizationUnavailable(f"scikit-learn not installed: {e}") from e
+    n = len(embeddings)
+    if n < 10:
+        return 1
+    upper = min(max_k, n - 1)  # silhouette needs k < n
+    best_k = 1
+    best_sil = -1.0
+    for k in range(2, upper + 1):
+        labels = AgglomerativeClustering(
+            n_clusters=k, metric="euclidean", linkage="ward",
+        ).fit_predict(embeddings)
+        _, counts = np.unique(labels, return_counts=True)
+        if counts.min() < 0.05 * n:
+            continue
+        try:
+            sil = float(silhouette_score(embeddings, labels, metric="euclidean"))
+        except Exception:
+            continue
+        if sil > best_sil:
+            best_sil = sil
+            best_k = k
+    return best_k if best_sil >= 0.10 else 1
 
 
 def _within_cluster_dist(embeddings, labels) -> float:

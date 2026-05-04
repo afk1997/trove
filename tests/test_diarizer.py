@@ -192,53 +192,33 @@ def test_embed_raises_unavailable_when_resemblyzer_missing(monkeypatch):
         d._embed_chunks("anything.wav", [{"start": 0, "end": 1}])
 
 
-def test_diarize_aligns_labels_with_kept_chunks_when_short_chunks_skipped(monkeypatch):
-    """Regression: short non-trailing chunks must not misalign speaker labels.
-
-    If _embed_chunks drops a chunk in the middle, _diarize must still pair
-    each surviving chunk with the cluster label that actually came from
-    embedding *that* chunk (not the chunk at the same positional index in
-    the original VAD output).
-    """
+def test_diarize_merges_consecutive_same_speaker_partials(monkeypatch):
+    """v3 pipeline: ``diarize`` collapses runs of same-label partials into
+    a single ``SpeakerChunk`` per turn. A 6-partial sequence labelled
+    [A,A,A,B,B,B] must come back as exactly two chunks covering each run."""
     monkeypatch.setenv("TROVE_DIARIZATION", "on")
     pytest.importorskip("sklearn")
     import numpy as np
     d = _fresh_diarizer()
 
-    # 5 VAD chunks; the middle one (index 2) is the "short" one that
-    # _embed_chunks would normally skip. We simulate that here.
-    fake_chunks = [
-        {"start": 0.0, "end": 1.0},   # speaker A
-        {"start": 1.5, "end": 2.5},   # speaker A
-        {"start": 3.0, "end": 3.05},  # SHORT — would be skipped
-        {"start": 4.0, "end": 5.0},   # speaker B
-        {"start": 5.5, "end": 6.5},   # speaker B
-    ]
-    monkeypatch.setattr(d, "_vad_speech_chunks", lambda _p: fake_chunks)
+    monkeypatch.setattr(d, "_vad_speech_chunks", lambda _p: [{"start": 0.0, "end": 6.0}])
 
-    # _embed_chunks returns ONLY the 4 surviving chunks + their embeddings.
-    kept = [fake_chunks[0], fake_chunks[1], fake_chunks[3], fake_chunks[4]]
-    embs = np.array([
-        [1.0, 0.0],
-        [1.0, 0.0],
-        [0.0, 1.0],
-        [0.0, 1.0],
+    times = [(float(i), float(i) + 1.0) for i in range(6)]
+    embs = np.vstack([
+        np.array([[1.0, 0.0]] * 3) + 0.01,
+        np.array([[0.0, 1.0]] * 3) + 0.01,
     ])
-    monkeypatch.setattr(d, "_embed_chunks", lambda _p, _c: (kept, embs))
+    monkeypatch.setattr(d, "_continuous_embeddings", lambda _p, _r: (times, embs))
+    # Disable smoothing so a clean [0,0,0,1,1,1] survives the median filter
+    monkeypatch.setattr(d, "_smooth_labels", lambda labels, window=9: labels)
 
     out = d.diarize(audio_path="ignored.wav", expected_speakers=2)
-
-    # The skipped chunk must NOT appear in the output.
-    assert len(out) == 4
-    assert all(c.start != 3.0 for c in out), "short chunk should be dropped"
-
-    # Crucial: the LAST two surviving chunks (the speaker-B group at
-    # 4.0-5.0 and 5.5-6.5) must share a label, distinct from the first
-    # two. With the old buggy slicing they would inherit the wrong label.
-    by_start = {c.start: c.speaker for c in out}
-    assert by_start[0.0] == by_start[1.5]
-    assert by_start[4.0] == by_start[5.5]
-    assert by_start[0.0] != by_start[4.0]
+    assert len(out) == 2, [(c.start, c.end, c.speaker) for c in out]
+    assert out[0].start == 0.0
+    assert out[0].end == 3.0
+    assert out[1].start == 3.0
+    assert out[1].end == 6.0
+    assert out[0].speaker != out[1].speaker
 
 
 def test_diarize_passes_through_explicit_speaker_count(monkeypatch):
@@ -248,24 +228,26 @@ def test_diarize_passes_through_explicit_speaker_count(monkeypatch):
     import numpy as np
     d = _fresh_diarizer()
 
-    # Stub the heavy steps with deterministic returns
     def fake_vad(_path):
-        return [{"start": float(i), "end": float(i) + 0.6} for i in range(6)]
+        return [{"start": 0.0, "end": 6.0}]
 
-    def fake_embed(_path, chunks):
-        # Real _embed_chunks returns (kept_chunks, embeddings).
-        # Six embeddings, two natural clusters; no chunks dropped.
+    def fake_continuous(_p, _r):
+        # Six partials, two natural clusters
+        times = [(float(i), float(i) + 1.0) for i in range(6)]
         embs = np.vstack([
             np.array([[1.0, 0.0]] * 3) + 0.01,
             np.array([[0.0, 1.0]] * 3) + 0.01,
         ])
-        return list(chunks), embs
+        return times, embs
 
     monkeypatch.setattr(d, "_vad_speech_chunks", fake_vad)
-    monkeypatch.setattr(d, "_embed_chunks", fake_embed)
+    monkeypatch.setattr(d, "_continuous_embeddings", fake_continuous)
+    # Bypass smoothing so 6 deterministic labels survive the median filter
+    monkeypatch.setattr(d, "_smooth_labels", lambda labels, window=9: labels)
 
     out = d.diarize(audio_path="ignored.wav", expected_speakers=2)
-    assert len(out) == 6
+    # With 6 partials cleanly split into 3+3 clusters, runs collapse to 2 chunks.
+    assert len(out) == 2
     assert {c.speaker for c in out} == {"Speaker 1", "Speaker 2"}
     # Clamping
     out_high = d.diarize(audio_path="ignored.wav", expected_speakers=99)
