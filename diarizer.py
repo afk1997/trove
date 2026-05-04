@@ -161,7 +161,10 @@ def diarize(*, audio_path: str,
                              speaker="Speaker 1")]
 
     labels = _cluster_partials(embeddings, k)
-    labels = _smooth_labels(labels, window=9)
+    # window=5 (~1.25s) lets short turns (≥1s) survive while still
+    # filtering out single-window flips. window=9 absorbed real
+    # 1-2s utterances like "Hi." and "Mary?" between long turns.
+    labels = _smooth_labels(labels, window=5)
 
     runs: list[SpeakerChunk] = []
     cur_s, cur_e, cur_l = times[0][0], times[0][1], labels[0]

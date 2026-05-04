@@ -246,6 +246,16 @@ def run_transcribe(*, audio_path: str, model_path: str,
 
     # Each Segment is a word: {.t0 (centiseconds), .t1, .text}.
     # Convert to seconds and build word array, then group into paragraphs.
+    #
+    # whisper.cpp without DTW (which pywhispercpp's build doesn't expose)
+    # sets each word's t1 to the NEXT word's t0 — so a word followed by
+    # a long silence inherits a duration that spans the entire silence.
+    # That's wrong for the click-to-seek + highlight-tracking UI, where
+    # the active-word marker would linger across seconds of silence.
+    # Cap each word's emitted duration at WORD_MAX_DURATION; the click
+    # target (start) is unaffected, the player's onTimeUpdate just
+    # advances off the word once the audio passes its likely end.
+    WORD_MAX_DURATION = 1.5
     words = []
     duration = 0.0
     for seg in raw_segments:
@@ -255,6 +265,8 @@ def run_transcribe(*, audio_path: str, model_path: str,
         text = (getattr(seg, "text", "") or "").strip()
         if not text:
             continue
+        if t1 - t0 > WORD_MAX_DURATION:
+            t1 = t0 + WORD_MAX_DURATION
         words.append({"w": text, "start": t0, "end": t1})
         duration = max(duration, t1)
 
