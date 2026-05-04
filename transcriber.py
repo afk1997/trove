@@ -316,6 +316,116 @@ def _build_segment(words: list[dict], speaker: str | None = None) -> dict:
     }
 
 
+def realign_words_to_vad(result: "TranscriptResult", vad_chunks: list) -> None:
+    """Snap whisper word timestamps to silero-vad speech regions.
+
+    Whisper.cpp without DTW localizes words by cross-attention probability,
+    which drifts earlier than the actual audio after every silence. The
+    user-visible symptom: in a clip with a 1-second pause between turns,
+    the active-word highlight races ahead of the playback by ~0.5 s, and
+    the drift compounds as more silences accumulate.
+
+    silero-vad is independently accurate on speech-region boundaries.
+    Use its output as ground truth: any word whose ``start`` time falls
+    in a non-speech gap is snapped forward to the next speech region's
+    start. Word ends are clamped so they don't run into the next word
+    or exceed 1.5 s, matching the duration cap applied at transcribe time.
+
+    ``vad_chunks`` items may be dicts (``{"start", "end"}``) or objects
+    with ``.start`` / ``.end`` attributes (e.g. ``diarizer.SpeakerChunk``).
+    No-op when either input is empty.
+    """
+    if not result.words or not vad_chunks:
+        return
+
+    def _start(c):
+        return float(c["start"]) if isinstance(c, dict) else float(getattr(c, "start", 0))
+
+    def _end(c):
+        return float(c["end"]) if isinstance(c, dict) else float(getattr(c, "end", 0))
+
+    sorted_vad = sorted(vad_chunks, key=_start)
+    words = result.words
+    n = len(words)
+
+    def _next_region_after(t: float):
+        for c in sorted_vad:
+            if _start(c) > t:
+                return c
+        return None
+
+    def _in_region(t: float) -> bool:
+        for c in sorted_vad:
+            cs, ce = _start(c), _end(c)
+            if cs <= t < ce:
+                return True
+            if cs > t:
+                return False
+        return False
+
+    # Snap ONLY isolated gap-words (a single word whose start falls in a
+    # silent region between two in-region neighbours). Whisper's biggest
+    # alignment error is the first word after a silence — those are
+    # routinely emitted ~0.3-0.5 s early, producing the visible "highlight
+    # races ahead of the audio" effect.
+    #
+    # Multi-word gap RUNS are left alone. When whisper reorders a long
+    # span of words across a silence (e.g. it places 6 words in the gap
+    # before the actual speech region they belong to), nothing we can do
+    # here recovers the truth — uniform-offset snapping would shove
+    # later words past the vad region's end, then strict monotonicity
+    # would chain-bump every following in-region word and crater accuracy.
+    # Trying to fix this without ground-truth alignment (DTW) would make
+    # things worse on average.
+    for i in range(n):
+        ws = float(words[i]["start"])
+        if _in_region(ws):
+            continue
+        prev_in = i == 0 or _in_region(float(words[i - 1]["start"]))
+        next_in = i == n - 1 or _in_region(float(words[i + 1]["start"]))
+        if not (prev_in and next_in):
+            continue  # part of a multi-word gap run — leave alone
+        next_r = _next_region_after(ws)
+        if next_r is None:
+            continue  # trailing silence past every region
+        words[i]["start"] = _start(next_r)
+
+    # Monotonic-strict: each word.start must be > predecessor's. After
+    # the uniform-offset snap a run of words has its original spacing,
+    # but two adjacent words can still tie if whisper itself emitted
+    # equal timestamps (it does this for very short tokens). Bump the
+    # follower by a tiny amount in that case so the editor can still
+    # distinguish them.
+    for i in range(1, n):
+        if words[i]["start"] <= words[i - 1]["start"]:
+            words[i]["start"] = words[i - 1]["start"] + 0.01
+
+    # Re-cap word.end so it doesn't run into the next word or exceed 1.5 s.
+    WORD_MAX_DURATION = 1.5
+    for i, w in enumerate(words):
+        max_end = w["start"] + WORD_MAX_DURATION
+        if i + 1 < n:
+            max_end = min(max_end, words[i + 1]["start"])
+        if w["end"] > max_end:
+            w["end"] = max_end
+        if w["end"] < w["start"]:
+            w["end"] = w["start"] + 0.05  # 50 ms minimum so the highlight is visible
+
+    # Segment timestamps are derived from their first/last word, so they
+    # stay accurate after realignment if we re-derive them from the
+    # (now-corrected) word objects each segment references.
+    for seg in result.segments:
+        seg_words = seg.get("words") or []
+        if seg_words:
+            seg["start"] = seg_words[0]["start"]
+            seg["end"] = seg_words[-1]["end"]
+
+    result.duration = max(
+        result.duration,
+        result.words[-1]["end"] if result.words else result.duration,
+    )
+
+
 def apply_speakers(result: "TranscriptResult", chunks: list) -> None:
     """Assign a speaker to each word and regroup ``result.segments``.
 

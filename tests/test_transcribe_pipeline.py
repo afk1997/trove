@@ -152,6 +152,10 @@ def test_pipeline_with_diarization_stub_writes_speakers(tmp_path, monkeypatch):
     # Stub the diarizer module that the worker imports lazily.
     import diarizer
     monkeypatch.setattr(diarizer, "available", lambda: True)
+    # The worker now calls _vad_speech_chunks before diarize() to realign
+    # word timestamps against speech boundaries — stub both.
+    monkeypatch.setattr(diarizer, "_vad_speech_chunks",
+                        lambda _p: [{"start": 0.0, "end": 1.0}])
     monkeypatch.setattr(diarizer, "diarize", lambda *, audio_path: [
         _Chunk(0.0, 0.5, "Speaker 1"),
         _Chunk(0.5, 1.0, "Speaker 2"),
@@ -248,6 +252,8 @@ def test_pipeline_diarize_failure_doesnt_kill_transcribe(tmp_path, monkeypatch):
 
     import diarizer
     monkeypatch.setattr(diarizer, "available", lambda: True)
+    monkeypatch.setattr(diarizer, "_vad_speech_chunks",
+                        lambda _p: [{"start": 0.0, "end": 1.0}])
     def _explode(*, audio_path):
         raise RuntimeError("boom")
     monkeypatch.setattr(diarizer, "diarize", _explode)
@@ -293,6 +299,8 @@ def test_pipeline_diarize_empty_chunks_keeps_speakers_none(tmp_path, monkeypatch
 
     import diarizer
     monkeypatch.setattr(diarizer, "available", lambda: True)
+    # Empty VAD too — matches the "no speech" outcome end-to-end.
+    monkeypatch.setattr(diarizer, "_vad_speech_chunks", lambda _p: [])
     monkeypatch.setattr(diarizer, "diarize", lambda *, audio_path: [])  # no speech detected
 
     monkeypatch.setattr(models_store, "get_active_path", lambda: tmp_path / "fake.bin")

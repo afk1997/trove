@@ -852,11 +852,20 @@ def create_app() -> Flask:
                     tj.error_message = result.error
                     return
 
-                # 2.5 Diarize (best-effort; failure NEVER kills the transcribe).
-                # Only runs when TROVE_DIARIZATION=on AND the optional deps are
-                # installed. Outcome is recorded on the TranscribeJob so the
-                # API/CLI/MCP can surface "diarization failed: <reason>" to the
-                # user instead of silently dropping speaker labels:
+                # 2.5 Diarize + word-realignment (best-effort; failure NEVER
+                # kills the transcribe). Only runs when TROVE_DIARIZATION=on
+                # AND the optional deps are installed.
+                #
+                # Word realignment: silero-vad's speech regions are used as
+                # ground truth to fix whisper.cpp's drift after silences
+                # (without DTW, whisper places words ~0.3-0.5s too early
+                # after each pause and the error compounds across the clip).
+                # We get the VAD chunks once and reuse them: realignment
+                # first, then diarization. Diarization re-derives its own
+                # VAD internally (deliberate — it operates on speech regions
+                # in the original timeline).
+                #
+                # Diarization outcome on the TranscribeJob:
                 #   None     → not attempted (feature off / deps missing)
                 #   complete → chunks applied; speaker_count set
                 #   empty    → ran but no speech detected
@@ -865,6 +874,9 @@ def create_app() -> Flask:
                     import diarizer
                     if diarizer.available():
                         try:
+                            vad_regions = diarizer._vad_speech_chunks(wav_path)
+                            if vad_regions:
+                                transcriber.realign_words_to_vad(result, vad_regions)
                             chunks = diarizer.diarize(audio_path=wav_path)
                             if chunks:
                                 transcriber.apply_speakers(result, chunks)
