@@ -62,7 +62,7 @@
     pointer-events: none;
     mix-blend-mode: multiply;
     /* Sits above the cream page background but BELOW all sticky chrome
-       (.t-doc-header z:30, .t-doc-toolbar z:28),
+       (.t-topbar z:30),
        floating UI (.t-jump-current z:45, .t-context-menu z:60,
        .t-toast-stack z:80), and modals (z:1000).
        Previously z:100 which visually multiplied the dot texture onto

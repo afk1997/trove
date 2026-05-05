@@ -875,8 +875,6 @@
 
   // ===== SEARCH ===========================================================
   const searchInput = document.getElementById('t-search');
-  const searchOpenBtn = document.getElementById('t-tb-search');
-  const searchClose = document.getElementById('t-tb-search-close');
   const sPrev = document.getElementById('t-prev');
   const sNext = document.getElementById('t-next');
   const countEl = document.getElementById('t-search-count');
@@ -923,8 +921,6 @@
     markCurrent();
   }
   // openSearch / closeSearch are defined later in the SEARCH POPOVER section
-  if (searchOpenBtn) searchOpenBtn.addEventListener('click', function () { openSearch('find'); });
-  if (searchClose) searchClose.addEventListener('click', closeSearch);
   if (searchInput) searchInput.addEventListener('input', applySearch);
   if (sPrev) sPrev.addEventListener('click', function () { searchStep(-1); });
   if (sNext) sNext.addEventListener('click', function () { searchStep(+1); });
@@ -934,13 +930,6 @@
   const frRepl = document.getElementById('t-fr-replace');
   const frCase = document.getElementById('t-fr-case');
   const frGo = document.getElementById('t-fr-go');
-  const frClose = document.getElementById('t-fr-close');
-  const frBtn = document.getElementById('t-tb-find-replace');
-  // openFR / closeFR: use openSearch('replace') / closeSearch() via popover
-  function openFR() { openSearch('replace'); }
-  function closeFR() { closeSearch(); }
-  if (frBtn) frBtn.addEventListener('click', openFR);
-  if (frClose) frClose.addEventListener('click', closeFR);
   if (frGo) frGo.addEventListener('click', async function () {
     const find = (frFind.value || '').trim();
     if (!find) return;
