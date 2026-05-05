@@ -244,11 +244,11 @@ def test_transcript_page_renders(client, tmp_path, monkeypatch):
     res = client.get("/transcript/t1")
     assert res.status_code == 200
     body = res.data.decode()
-    # v3 four-zone document layout
+    # v4 document layout
     assert 'class="transcript-doc"' in body
     assert 'id="t-doc-header"' in body
     assert 'id="t-doc-toolbar"' in body
-    assert 'id="t-player-bar"' in body
+    assert 'class="t-sidebar-player"' in body
     assert 'id="t-body"' in body
     # contenteditable paragraph + word spans
     assert 'class="t-seg-body"' in body

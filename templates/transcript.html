@@ -78,20 +78,6 @@
     </div>
   </div>
 
-  {# === ZONE C: compact sticky player === #}
-  <div class="t-player-bar" id="t-player-bar">
-    <button type="button" class="t-pb-play" id="t-pb-play" aria-label="play / pause">▶</button>
-    <input type="range" class="t-pb-scrub" id="t-pb-scrub" min="0" max="100" step="0.1" value="0" aria-label="seek">
-    <span class="t-pb-time" id="t-pb-time">0:00 / 0:00</span>
-    <div class="t-pb-speed" role="group" aria-label="playback speed">
-      <button type="button" class="t-pb-speed-btn" data-rate="0.5">0.5×</button>
-      <button type="button" class="t-pb-speed-btn is-active" data-rate="1">1×</button>
-      <button type="button" class="t-pb-speed-btn" data-rate="1.25">1.25×</button>
-      <button type="button" class="t-pb-speed-btn" data-rate="1.5">1.5×</button>
-      <button type="button" class="t-pb-speed-btn" data-rate="2">2×</button>
-    </div>
-  </div>
-
   {# === ZONE D: 2-column grid (doc body + sidebar) === #}
   <div class="t-grid" id="t-grid">
     <section class="t-doc-body transcript-body" id="t-body">
@@ -108,6 +94,19 @@
           <audio id="t-player" preload="metadata" src="{{ media_url }}"></audio>
         </div>
       {% endif %}
+      <div class="t-sidebar-player">
+        <button type="button" class="t-pb-play" id="t-pb-play" aria-label="play / pause">▶</button>
+        <span class="t-pb-time" id="t-pb-time">0:00 / 0:00</span>
+        <input type="range" class="t-pb-scrub" id="t-pb-scrub"
+               min="0" max="100" step="0.1" value="0" aria-label="seek">
+        <div class="t-pb-speed" role="group" aria-label="playback speed">
+          <button type="button" class="t-pb-speed-btn" data-rate="0.5">0.5×</button>
+          <button type="button" class="t-pb-speed-btn is-active" data-rate="1">1×</button>
+          <button type="button" class="t-pb-speed-btn" data-rate="1.25">1.25×</button>
+          <button type="button" class="t-pb-speed-btn" data-rate="1.5">1.5×</button>
+          <button type="button" class="t-pb-speed-btn" data-rate="2">2×</button>
+        </div>
+      </div>
     </aside>
   </div>
 
