@@ -899,6 +899,26 @@
       position: relative;
     }
 
+    /* --- v4: 2-column grid + sticky right rail --- */
+    .t-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 32px;
+      align-items: start;
+    }
+    .t-doc-body {
+      max-width: 720px;
+      min-width: 0;  /* allow text truncation in flex-grid context */
+    }
+    .t-sidebar {
+      position: sticky;
+      top: 76px;
+      align-self: start;
+      display: flex; flex-direction: column;
+      gap: 16px;
+      width: 320px;
+    }
+
     /* --- Zone A: header (sticky top) --- */
     .t-doc-header {
       position: sticky; top: 0; z-index: 30;

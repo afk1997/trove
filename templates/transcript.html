@@ -99,26 +99,35 @@
     {% endif %}
   </div>
 
-  {# === ZONE D: document body === #}
-  <div class="t-doc-page" id="t-doc-page">
-    {% if not is_audio %}
-      <aside id="t-video-rail" class="t-video-rail" data-state="floating"
-             aria-label="video player">
-        <div class="t-video-rail-grab" aria-hidden="true" title="drag">⠿</div>
-        <video id="t-player" controls preload="metadata"
-               src="{{ media_url }}" playsinline></video>
-        <div class="t-video-rail-actions">
-          <button type="button" class="t-video-rail-expand"
-                  aria-label="expand video to side rail" title="expand">⛶</button>
-          <button type="button" class="t-video-rail-close"
-                  aria-label="hide video" title="hide">✕</button>
-        </div>
-      </aside>
-    {% endif %}
-    <section class="transcript-body" id="t-body">
+  {# === ZONE D: 2-column grid (doc body + sidebar) === #}
+  <div class="t-grid" id="t-grid">
+    <section class="t-doc-body transcript-body" id="t-body">
       {% for seg in data.segments %}{% set seg_idx = loop.index0 %}{% include "partials/transcript_segment.html" %}{% endfor %}
     </section>
+    <aside class="t-sidebar" id="t-sidebar" aria-label="video and reference panels">
+      {# t-sidebar-video, t-sidebar-player, t-sidebar-panel--speakers,
+         t-sidebar-panel--bookmarks land here in subsequent tasks. The
+         old .t-video-rail and .t-player-bar still render above; this
+         empty shell is enough to satisfy the grid + sidebar layout
+         tests. #}
+    </aside>
   </div>
+
+  {# Legacy .t-video-rail kept temporarily — removed in Task 3. #}
+  {% if not is_audio %}
+    <aside id="t-video-rail" class="t-video-rail" data-state="floating"
+           aria-label="video player">
+      <div class="t-video-rail-grab" aria-hidden="true" title="drag">⠿</div>
+      <video id="t-player" controls preload="metadata"
+             src="{{ media_url }}" playsinline></video>
+      <div class="t-video-rail-actions">
+        <button type="button" class="t-video-rail-expand"
+                aria-label="expand video to side rail" title="expand">⛶</button>
+        <button type="button" class="t-video-rail-close"
+                aria-label="hide video" title="hide">✕</button>
+      </div>
+    </aside>
+  {% endif %}
 
   <button type="button" class="t-jump-current" id="t-jump-current" hidden>↓ jump to current</button>
 
