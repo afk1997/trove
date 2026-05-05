@@ -1014,6 +1014,91 @@
       border-color: color-mix(in srgb, var(--orange) 30%, transparent);
     }
 
+    /* --- Sidebar panels (speakers, bookmarks) --- */
+    .t-sidebar-panel {
+      background: var(--cream);
+      border: 1px solid color-mix(in srgb, var(--teal) 14%, transparent);
+      border-radius: 8px;
+      padding: 0;
+    }
+    .t-sidebar-panel summary {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px;
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      font-size: 12px;
+      text-transform: lowercase;
+      color: var(--teal);
+      cursor: pointer;
+      list-style: none;
+    }
+    .t-sidebar-panel summary::-webkit-details-marker { display: none; }
+    .t-sidebar-panel summary::after {
+      content: '▾';
+      color: color-mix(in srgb, var(--teal) 60%, transparent);
+      transition: transform 120ms ease;
+    }
+    .t-sidebar-panel:not([open]) summary::after { transform: rotate(-90deg); }
+    .t-sidebar-panel-h { font-weight: 600; }
+    .t-sidebar-panel-count {
+      font-size: 11px;
+      color: color-mix(in srgb, var(--teal) 60%, transparent);
+      margin-left: auto; padding-right: 12px;
+    }
+    .t-sidebar-panel-body {
+      list-style: none; margin: 0; padding: 4px 14px 12px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .t-sidebar-empty {
+      font-size: 11px;
+      color: color-mix(in srgb, var(--teal) 50%, transparent);
+      font-style: italic;
+    }
+    .t-sidebar-speaker-row {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .t-sidebar-speaker-dot {
+      color: color-mix(in srgb, var(--teal) 30%, transparent);
+      font-size: 10px;
+    }
+    .t-sidebar-speaker-row.is-talking .t-sidebar-speaker-dot {
+      color: var(--orange);
+    }
+    .t-sidebar-speaker-name {
+      appearance: none; background: transparent; border: 0;
+      padding: 2px 6px;
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      font-size: 12px;
+      color: var(--teal);
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    .t-sidebar-speaker-name:hover {
+      background: color-mix(in srgb, var(--orange) 10%, transparent);
+      color: var(--orange);
+    }
+    .t-sidebar-bookmark-row {
+      display: flex; align-items: baseline; gap: 8px;
+    }
+    .t-sidebar-bookmark-time {
+      appearance: none; background: transparent; border: 0;
+      padding: 0;
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      font-size: 11px;
+      color: color-mix(in srgb, var(--teal) 65%, transparent);
+      cursor: pointer;
+      font-variant-numeric: tabular-nums;
+      flex-shrink: 0;
+    }
+    .t-sidebar-bookmark-time:hover { color: var(--orange); }
+    .t-sidebar-bookmark-note {
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      font-size: 11px;
+      color: var(--teal);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     /* --- Zone A: header (sticky top) --- */
     .t-doc-header {
       position: sticky; top: 0; z-index: 30;

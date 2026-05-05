@@ -6,6 +6,12 @@
 {%- set _dur_h = _dur // 3600 -%}
 {%- set _dur_m = (_dur % 3600) // 60 -%}
 {%- set _dur_s = _dur % 60 -%}
+{%- set _speakers = [] -%}
+{%- for seg in data.segments -%}
+  {%- if seg.speaker and seg.speaker not in _speakers -%}
+    {%- set _ = _speakers.append(seg.speaker) -%}
+  {%- endif -%}
+{%- endfor -%}
 <main class="transcript-doc" data-transcribe-id="{{ tj.id }}">
 
   {# === ZONE A: header (sticky) === #}
@@ -107,6 +113,48 @@
           <button type="button" class="t-pb-speed-btn" data-rate="2">2×</button>
         </div>
       </div>
+      <details class="t-sidebar-panel t-sidebar-panel--speakers" open>
+        <summary>
+          <span class="t-sidebar-panel-h">Speakers</span>
+          <span class="t-sidebar-panel-count">{{ _speakers | length }}</span>
+        </summary>
+        <ul class="t-sidebar-panel-body" data-role="speakers-list">
+          {% for spk in _speakers %}
+            <li class="t-sidebar-speaker-row" data-speaker="{{ spk }}">
+              <span class="t-sidebar-speaker-dot" aria-hidden="true">●</span>
+              <button type="button" class="t-sidebar-speaker-name"
+                      data-action="rename-speaker" data-speaker="{{ spk }}"
+                      title="rename globally">{{ spk }}</button>
+            </li>
+          {% endfor %}
+          {% if not _speakers %}
+            <li class="t-sidebar-empty">No speaker labels yet.</li>
+          {% endif %}
+        </ul>
+      </details>
+      {%- set _bookmarks = (data.bookmarks or []) | sort(attribute='time') -%}
+      <details class="t-sidebar-panel t-sidebar-panel--bookmarks" open>
+        <summary>
+          <span class="t-sidebar-panel-h">Bookmarks</span>
+          <span class="t-sidebar-panel-count">{{ _bookmarks | length }}</span>
+        </summary>
+        <ul class="t-sidebar-panel-body" data-role="bookmarks-list">
+          {% for bm in _bookmarks %}
+            <li class="t-sidebar-bookmark-row" data-bookmark-id="{{ bm.id }}" data-time="{{ bm.time }}">
+              <button type="button" class="t-sidebar-bookmark-time"
+                      data-action="seek-bookmark" data-time="{{ bm.time }}">
+                {%- set _bm_m = (bm.time | int) // 60 -%}
+                {%- set _bm_s = (bm.time | int) % 60 -%}
+                {{ '%d:%02d' | format(_bm_m, _bm_s) -}}
+              </button>
+              <span class="t-sidebar-bookmark-note">{{ bm.note or '' }}</span>
+            </li>
+          {% endfor %}
+          {% if not _bookmarks %}
+            <li class="t-sidebar-empty">No bookmarks yet.</li>
+          {% endif %}
+        </ul>
+      </details>
     </aside>
   </div>
 
@@ -570,6 +618,33 @@
       else if (e.key === 'Escape') { e.preventDefault(); done = true; input.replaceWith(btn); }
     });
   }
+
+  // ===== SIDEBAR SPEAKER RENAME (prompt-based, delegates on sidebar buttons) =
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.t-sidebar-speaker-name[data-action="rename-speaker"]');
+    if (!btn) return;
+    const oldName = btn.dataset.speaker || '';
+    const newName = window.prompt('Rename "' + oldName + '" to:', oldName);
+    if (!newName || newName === oldName) return;
+    flushAllPending().then(function () {
+      const qs = new URLSearchParams();
+      qs.set('old', oldName);
+      qs.set('new', newName);
+      fetchTracked('/api/transcribe/' + TID + '/speaker-rename', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: qs.toString(),
+      }).then(function (res) { if (res && res.ok) location.reload(); });
+    });
+  });
+
+  // ===== SIDEBAR BOOKMARK SEEK ============================================
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.t-sidebar-bookmark-time[data-action="seek-bookmark"]');
+    if (!btn) return;
+    const time = parseFloat(btn.dataset.time);
+    if (!isNaN(time)) { player.currentTime = time; player.play().catch(function () {}); }
+  });
 
   // ===== TIMESTAMP CLICK -> SEEK ==========================================
   bodyEl.addEventListener('click', function (e) {
