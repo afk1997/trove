@@ -769,10 +769,12 @@
     bodyEl.querySelectorAll('.word.is-active').forEach(function (w) { w.classList.remove('is-active'); });
     bodyEl.querySelectorAll('.t-segment.is-active-segment').forEach(function (s) { s.classList.remove('is-active-segment'); });
     activeIdx = idx;
+    let activeSeg = null;
     if (idx >= 0 && words[idx]) {
       words[idx].classList.add('is-active');
       const seg = words[idx].closest('.t-segment');
       if (seg) {
+        activeSeg = seg;
         seg.classList.add('is-active-segment');
         if (followToggle && followToggle.checked && !followingPaused) {
           programmaticScroll = true;
@@ -782,6 +784,12 @@
         updateJumpButton();
       }
     }
+    // Sync .is-talking on speakers-panel rows to the active segment's speaker.
+    const speakerBtn = activeSeg ? activeSeg.querySelector('.t-seg-speaker') : null;
+    const activeSpeaker = speakerBtn ? speakerBtn.dataset.speaker : null;
+    document.querySelectorAll('.t-sidebar-speaker-row').forEach(function (row) {
+      row.classList.toggle('is-talking', !!(activeSpeaker && row.dataset.speaker === activeSpeaker));
+    });
   }
   player.addEventListener('timeupdate', updateActive);
 
