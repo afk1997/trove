@@ -91,6 +91,7 @@ def test_renders_single_topbar(client_with_done_transcript):
     assert 't-topbar' in body, "v4 topbar must render"
     assert 't-doc-toolbar' not in body, "v3 toolbar zone must be removed"
     assert 't-player-bar' not in body, "v3 player bar zone must be removed"
+    assert 't-sidebar-player' in body, "v4 sidebar player must render"
 
 
 def test_renders_two_column_grid(client_with_done_transcript):
@@ -117,6 +118,7 @@ def test_no_video_rail_state_machine(client_with_done_transcript):
     assert 'data-state="floating"' not in body
     assert 'data-state="expanded"' not in body
     assert 't-video-show-btn' not in body
+    assert 't-sidebar-video' in body, "v4 sidebar video must render instead"
 
 
 def test_speakers_panel_lists_distinct_speakers(client_with_done_transcript):
@@ -146,5 +148,5 @@ def test_search_popover_present_no_inline_bars(client_with_done_transcript):
     c, tjid = client_with_done_transcript
     body = c.get(f"/transcript/{tjid}").data.decode()
     assert 't-search-popover' in body, "search popover must render"
-    assert 't-tb-search-bar' not in body
-    assert 't-fr-bar' not in body
+    assert 't-tb-search-bar' not in body, "v3 toolbar search bar must be removed"
+    assert 't-fr-bar' not in body, "v3 floating right search bar must be removed"
