@@ -1195,7 +1195,26 @@
     .t-topbar .t-doc-saving { flex: 0 0 auto; }
     .t-topbar-actions {
       flex: 0 0 auto;
-      display: flex; align-items: center; gap: 4px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    /* Icon buttons inside the topbar are larger than the shared
+       .t-tb-btn defaults: bigger glyphs, real hit-target, hairline
+       border so they read as buttons. The shared .t-tb-btn is reused
+       inside dropdown menus and the export panel where the smaller
+       size is correct, so we override here rather than mutate the
+       shared rule. */
+    .t-topbar-actions .t-tb-btn {
+      font-size: 16px;
+      line-height: 1;
+      min-width: 32px; min-height: 32px;
+      padding: 0 8px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-color: color-mix(in srgb, var(--teal) 16%, transparent);
+    }
+    .t-topbar-actions .t-tb-btn:hover {
+      background: color-mix(in srgb, var(--teal) 8%, transparent);
+      border-color: color-mix(in srgb, var(--teal) 32%, transparent);
+      color: var(--teal);
     }
     .t-tb-more { position: relative; }
     .t-tb-more summary { list-style: none; cursor: pointer; }
