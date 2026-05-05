@@ -246,8 +246,8 @@ def test_transcript_page_renders(client, tmp_path, monkeypatch):
     body = res.data.decode()
     # v4 document layout
     assert 'class="transcript-doc"' in body
-    assert 'id="t-doc-header"' in body
-    assert 'id="t-doc-toolbar"' in body
+    assert 'id="t-topbar"' in body
+    assert 'class="t-topbar"' in body
     assert 'class="t-sidebar-player"' in body
     assert 'id="t-body"' in body
     # contenteditable paragraph + word spans

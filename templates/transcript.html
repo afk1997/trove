@@ -14,51 +14,30 @@
 {%- endfor -%}
 <main class="transcript-doc" data-transcribe-id="{{ tj.id }}">
 
-  {# === ZONE A: header (sticky) === #}
-  <header class="t-doc-header" id="t-doc-header">
-    <div class="t-doc-header-row1">
-      <a class="t-doc-mark" href="/">trove<span class="period">.</span></a>
-      <span class="t-doc-crumb">transcript</span>
-      <h1 class="t-doc-title" id="t-doc-title"
-          contenteditable="plaintext-only" spellcheck="false"
-          data-current="{{ _eff_title }}">{{ _eff_title }}</h1>
-      <span class="t-doc-saving" id="t-doc-saving" data-state="idle"
-            aria-live="polite" title="saving status">
-        <span class="t-doc-saving-dot"></span><span class="t-doc-saving-text">✓ saved</span>
-      </span>
-    </div>
-    <p class="t-doc-meta">
+  {# === ZONE A+B: single sticky topbar === #}
+  <header class="t-topbar" id="t-topbar">
+    <a class="t-doc-mark" href="/">trove<span class="period">.</span></a>
+    <span class="t-doc-crumb">›</span>
+    <h1 class="t-doc-title" id="t-doc-title"
+        contenteditable="plaintext-only" spellcheck="false"
+        data-current="{{ _eff_title }}">{{ _eff_title }}</h1>
+    <p class="t-topbar-meta">
       <span>{% if _dur_h %}{{ '%d:%02d:%02d' | format(_dur_h, _dur_m, _dur_s) }}{% else %}{{ '%d:%02d' | format(_dur_m, _dur_s) }}{% endif %}</span>
       <span class="sep">·</span> <span>{{ (data.language or "—") | upper }}</span>
-      <span class="sep">·</span> <span>{{ tj.model_used }}</span>
       {% if was_edited %}<span class="sep">·</span> <span class="t-edited-badge" id="t-edited-badge">edited</span>{% endif %}
     </p>
-  </header>
-
-  {# === ZONE B: toolbar === #}
-  <div class="t-doc-toolbar" id="t-doc-toolbar">
-    <div class="t-tb-group">
-      <button type="button" class="t-tb-btn" id="t-tb-search" title="search (⌘F)">⚲ search</button>
-      <button type="button" class="t-tb-btn" id="t-tb-find-replace" title="find & replace (⌘⇧F)">⇄ find/replace</button>
-    </div>
-    <div class="t-tb-group">
-      <button type="button" class="t-tb-btn" id="t-tb-undo" title="undo (⌘Z)">↶ undo</button>
-      <button type="button" class="t-tb-btn" id="t-tb-redo" title="redo (⌘⇧Z)">↷ redo</button>
-    </div>
-    <div class="t-tb-group t-tb-toggles">
-      <label class="t-tb-toggle"><input type="checkbox" id="t-tb-show-speakers" checked>speakers</label>
-      <label class="t-tb-toggle"><input type="checkbox" id="t-tb-show-times" checked>times</label>
-      <label class="t-tb-toggle" id="t-tb-follow-wrap"><input type="checkbox" id="t-tb-follow" checked>follow</label>
-    </div>
-    <div class="t-tb-group t-tb-right">
+    <span class="t-doc-saving" id="t-doc-saving" data-state="idle"
+          aria-live="polite" title="saving status">
+      <span class="t-doc-saving-dot"></span><span class="t-doc-saving-text">✓ saved</span>
+    </span>
+    <div class="t-topbar-actions">
+      <button type="button" class="t-tb-btn" id="t-tb-undo" title="undo (⌘Z)">↶</button>
+      <button type="button" class="t-tb-btn" id="t-tb-redo" title="redo (⌘⇧Z)">↷</button>
+      <button type="button" class="t-tb-btn" id="t-tb-search-toggle"
+              title="find / replace (⌘F)" aria-controls="t-search-popover">⌕</button>
       <details class="t-tb-export">
-        <summary class="t-tb-btn">⬇ export ▾</summary>
+        <summary class="t-tb-btn" title="export">⤓</summary>
         <div class="t-tb-export-menu">
-          {# Sign the export URLs so direct <a> downloads work even when
-             TROVE_TOKEN is set — browsers can't attach Authorization
-             headers to anchor clicks. Scope is ``transcript-export``
-             so the same sig can't be replayed against media or page
-             routes; ``exp`` bounds the link's lifetime. #}
           {% set _eq = signed_query(tj.id, SCOPE_TRANSCRIPT_EXPORT) %}
           {% set _q = ('?' ~ _eq) if _eq else '' %}
           <a href="/api/transcribe/{{ tj.id }}/export.txt{{ _q }}">.txt</a>
@@ -66,23 +45,17 @@
           <a href="/api/transcribe/{{ tj.id }}/export.vtt{{ _q }}">.vtt</a>
         </div>
       </details>
-      <button type="button" class="t-tb-btn" id="t-help-btn" title="how to use (?)">?</button>
+      <details class="t-tb-more">
+        <summary class="t-tb-btn" title="more">⋯</summary>
+        <div class="t-tb-more-menu">
+          <label class="t-tb-toggle" id="t-tb-follow-wrap"><input type="checkbox" id="t-tb-follow" checked>follow-along</label>
+          <label class="t-tb-toggle"><input type="checkbox" id="t-tb-show-speakers" checked>show speakers</label>
+          <label class="t-tb-toggle"><input type="checkbox" id="t-tb-show-times" checked>show times</label>
+          <button type="button" class="t-tb-btn" id="t-help-btn">how to use</button>
+        </div>
+      </details>
     </div>
-    <div class="t-tb-search-bar" id="t-tb-search-bar" hidden>
-      <input id="t-search" type="search" placeholder="⚲ search transcript…" autocomplete="off">
-      <button type="button" id="t-prev" aria-label="previous">↑</button>
-      <button type="button" id="t-next" aria-label="next">↓</button>
-      <span id="t-search-count" aria-live="polite"></span>
-      <button type="button" id="t-tb-search-close" aria-label="close">×</button>
-    </div>
-    <div class="t-tb-fr-bar" id="t-fr-bar" hidden>
-      <input type="text" id="t-fr-find" placeholder="find…" autocomplete="off">
-      <input type="text" id="t-fr-replace" placeholder="replace…" autocomplete="off">
-      <label><input type="checkbox" id="t-fr-case"> case</label>
-      <button type="button" id="t-fr-go">replace all</button>
-      <button type="button" id="t-fr-close" aria-label="close">×</button>
-    </div>
-  </div>
+  </header>
 
   {# === ZONE D: 2-column grid (doc body + sidebar) === #}
   <div class="t-grid" id="t-grid">
@@ -1194,7 +1167,7 @@
   // ===== EDITED BADGE =====================================================
   function markEditedBadge() {
     if (document.getElementById('t-edited-badge')) return;
-    const meta = document.querySelector('.t-doc-meta');
+    const meta = document.querySelector('.t-topbar-meta');
     if (!meta) return;
     meta.insertAdjacentHTML('beforeend',
       ' <span class="sep">·</span> <span class="t-edited-badge" id="t-edited-badge">edited</span>');
