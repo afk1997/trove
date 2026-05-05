@@ -15,6 +15,10 @@
     --orange:       #ff5728;
     --forest:       #1f7a3f;
 
+    /* Aliases used on transcript page */
+    --cream:        var(--light);   /* warm near-white */
+    --ink:          var(--teal);    /* dark navy */
+
     /* Faint orange dot for halftone overlay */
     --halftone:     rgba(255, 87, 40, 0.04);
 
@@ -61,10 +65,14 @@
       repeating-radial-gradient(circle at 0 0, var(--halftone) 0 0.8px, transparent 0.8px 6px);
     pointer-events: none;
     mix-blend-mode: multiply;
-    /* Sits above the cream page background but BELOW all sticky chrome
-       (.t-topbar z:30),
-       floating UI (.t-jump-current z:45, .t-context-menu z:60,
-       .t-toast-stack z:80), and modals (z:1000).
+    /* Sits above the cream page background but BELOW all sticky chrome.
+       z-index ladder:
+         topbar                        z:20
+         search popover / selection toolbar  z:30
+         export/more menu / context menu     z:40
+         jump-to-current               z:45
+         toast                         z:50
+         modal                         z:100
        Previously z:100 which visually multiplied the dot texture onto
        every sticky bar as the user scrolled. */
     z-index: 1;
@@ -753,7 +761,7 @@
   .modal-overlay {
     position: fixed; inset: 0;
     background: rgba(26, 53, 64, 0.55);
-    z-index: 1000;
+    z-index: 100;
     display: flex; align-items: center; justify-content: center;
     padding: 24px;
     animation: modal-fade-in 200ms ease-out;
@@ -1218,23 +1226,6 @@
       letter-spacing: 0.06em;
       color: color-mix(in srgb, var(--teal) 70%, transparent);
     }
-    .t-doc-title {
-      flex: 1 1 auto;
-      margin: 0;
-      font-family: 'Source Serif 4', 'Source Serif Pro', Georgia, serif;
-      font-size: clamp(22px, 2.4vw, 32px);
-      font-weight: 600;
-      color: var(--ink);
-      line-height: 1.15;
-      outline: none;
-      border-radius: 4px;
-      padding: 2px 4px;
-      margin-left: -4px;
-    }
-    .t-doc-title:focus-visible {
-      background: color-mix(in srgb, var(--orange) 8%, transparent);
-      box-shadow: inset 0 -2px 0 var(--orange);
-    }
     .t-doc-saving {
       flex: 0 0 auto;
       display: inline-flex; align-items: center; gap: 6px;
@@ -1491,7 +1482,7 @@
 
     /* --- Floating selection toolbar --- */
     .t-selection-toolbar {
-      position: absolute; z-index: 50;
+      position: absolute; z-index: 30;
       display: flex; gap: 2px;
       padding: 3px;
       background: var(--ink);
@@ -1514,7 +1505,7 @@
 
     /* --- Right-click context menu --- */
     .t-context-menu {
-      position: absolute; z-index: 60;
+      position: absolute; z-index: 40;
       display: flex; flex-direction: column; min-width: 160px;
       padding: 4px 0;
       background: white;
@@ -1558,7 +1549,7 @@
     .t-toast-stack {
       position: fixed; right: 18px; bottom: 18px;
       display: flex; flex-direction: column; gap: 6px;
-      z-index: 80;
+      z-index: 50;
       pointer-events: none;
     }
     .t-toast {
