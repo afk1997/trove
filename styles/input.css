@@ -1451,13 +1451,10 @@
       color: var(--ink);
       outline: none;
     }
-    /* v4: teal left rail for cursor focus AND active playback. Both
-       use the same indicator so they don't compete. */
-    .t-seg-body:focus-visible { box-shadow: inset 2px 0 0 var(--teal); }
-    .t-seg-body:focus-within,
-    .t-segment.is-active-segment .t-seg-body {
-      box-shadow: inset 2px 0 0 var(--teal);
-    }
+    /* No left rail — the active-segment background tint and the
+       browser's native text caret already indicate playback position
+       and cursor location. A separate rail butted against the text
+       was visually intrusive. */
 
     /* Word units inside the contenteditable paragraph */
     .word {
