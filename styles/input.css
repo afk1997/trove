@@ -1302,6 +1302,71 @@
       background: color-mix(in srgb, var(--orange) 10%, transparent);
       color: var(--orange);
     }
+    /* --- Search popover --- */
+    .t-search-popover {
+      position: fixed; top: 60px;
+      right: max(24px, calc((100vw - 1180px) / 2 + 24px));
+      width: 360px;
+      background: var(--cream);
+      border: 1px solid color-mix(in srgb, var(--teal) 25%, transparent);
+      border-radius: 8px;
+      box-shadow: 0 6px 24px color-mix(in srgb, black 18%, transparent);
+      padding: 12px;
+      z-index: 30;
+    }
+    .t-search-popover[hidden] { display: none; }
+    .t-search-tabs {
+      display: flex; gap: 4px; margin-bottom: 8px;
+    }
+    .t-search-tab {
+      appearance: none; background: transparent;
+      border: 1px solid transparent;
+      padding: 4px 10px;
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      font-size: 11px;
+      color: var(--teal);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .t-search-tab.is-active {
+      background: color-mix(in srgb, var(--orange) 12%, transparent);
+      color: var(--orange);
+    }
+    .t-search-pane {
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .t-search-pane[hidden] { display: none; }
+    .t-search-pane input[type="search"],
+    .t-search-pane input[type="text"] {
+      padding: 6px 10px;
+      background: color-mix(in srgb, var(--cream) 70%, white);
+      border: 1px solid color-mix(in srgb, var(--teal) 22%, transparent);
+      border-radius: 4px;
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      font-size: 12px;
+      color: var(--ink);
+      outline: none;
+    }
+    .t-search-pane-row {
+      display: flex; gap: 6px; align-items: center;
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      font-size: 11px;
+      color: var(--teal);
+    }
+    .t-search-pane-row button {
+      appearance: none; background: transparent;
+      border: 1px solid color-mix(in srgb, var(--teal) 22%, transparent);
+      padding: 4px 10px;
+      font-family: inherit; font-size: 11px;
+      color: var(--teal);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .t-search-pane-row button:hover {
+      background: color-mix(in srgb, var(--orange) 8%, transparent);
+      color: var(--orange);
+    }
+
     /* --- Zone D: document body --- */
     .transcript-body {
       max-width: 720px;

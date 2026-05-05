@@ -57,6 +57,29 @@
     </div>
   </header>
 
+  <div class="t-search-popover" id="t-search-popover" hidden role="dialog" aria-label="search">
+    <div class="t-search-tabs" role="tablist">
+      <button type="button" class="t-search-tab is-active" data-tab="find" role="tab">find</button>
+      <button type="button" class="t-search-tab" data-tab="replace" role="tab">find + replace</button>
+    </div>
+    <div class="t-search-pane t-search-pane--find" data-pane="find">
+      <input id="t-search" type="search" placeholder="search transcript…" autocomplete="off">
+      <div class="t-search-pane-row">
+        <button type="button" id="t-prev" aria-label="previous">↑</button>
+        <button type="button" id="t-next" aria-label="next">↓</button>
+        <span id="t-search-count" aria-live="polite"></span>
+      </div>
+    </div>
+    <div class="t-search-pane t-search-pane--replace" data-pane="replace" hidden>
+      <input type="text" id="t-fr-find" placeholder="find…" autocomplete="off">
+      <input type="text" id="t-fr-replace" placeholder="replace with…" autocomplete="off">
+      <div class="t-search-pane-row">
+        <label><input type="checkbox" id="t-fr-case"> match case</label>
+        <button type="button" id="t-fr-go">replace all</button>
+      </div>
+    </div>
+  </div>
+
   {# === ZONE D: 2-column grid (doc body + sidebar) === #}
   <div class="t-grid" id="t-grid">
     <section class="t-doc-body transcript-body" id="t-body">
@@ -843,7 +866,6 @@
   } catch (_) {}
 
   // ===== SEARCH ===========================================================
-  const searchBar = document.getElementById('t-tb-search-bar');
   const searchInput = document.getElementById('t-search');
   const searchOpenBtn = document.getElementById('t-tb-search');
   const searchClose = document.getElementById('t-tb-search-close');
@@ -892,24 +914,23 @@
     currentMatch = (currentMatch + d + matchIdxs.length) % matchIdxs.length;
     markCurrent();
   }
-  function openSearch() { if (searchBar) { searchBar.hidden = false; if (searchInput) searchInput.focus(); } }
-  function closeSearch() { if (searchBar) searchBar.hidden = true; clearMatches(); }
-  if (searchOpenBtn) searchOpenBtn.addEventListener('click', openSearch);
+  // openSearch / closeSearch are defined later in the SEARCH POPOVER section
+  if (searchOpenBtn) searchOpenBtn.addEventListener('click', function () { openSearch('find'); });
   if (searchClose) searchClose.addEventListener('click', closeSearch);
   if (searchInput) searchInput.addEventListener('input', applySearch);
   if (sPrev) sPrev.addEventListener('click', function () { searchStep(-1); });
   if (sNext) sNext.addEventListener('click', function () { searchStep(+1); });
 
   // ===== FIND-REPLACE =====================================================
-  const frBar = document.getElementById('t-fr-bar');
   const frFind = document.getElementById('t-fr-find');
   const frRepl = document.getElementById('t-fr-replace');
   const frCase = document.getElementById('t-fr-case');
   const frGo = document.getElementById('t-fr-go');
   const frClose = document.getElementById('t-fr-close');
   const frBtn = document.getElementById('t-tb-find-replace');
-  function openFR() { if (frBar) { frBar.hidden = false; if (frFind) frFind.focus(); } }
-  function closeFR() { if (frBar) frBar.hidden = true; }
+  // openFR / closeFR: use openSearch('replace') / closeSearch() via popover
+  function openFR() { openSearch('replace'); }
+  function closeFR() { closeSearch(); }
   if (frBtn) frBtn.addEventListener('click', openFR);
   if (frClose) frClose.addEventListener('click', closeFR);
   if (frGo) frGo.addEventListener('click', async function () {
@@ -1189,6 +1210,46 @@
   if (undoBtn) undoBtn.addEventListener('click', function () { document.execCommand('undo'); });
   if (redoBtn) redoBtn.addEventListener('click', function () { document.execCommand('redo'); });
 
+  // ===== SEARCH POPOVER (open/close + tab switching) =======================
+  const SEARCH_POPOVER = document.getElementById('t-search-popover');
+  const SEARCH_TOGGLE = document.getElementById('t-tb-search-toggle');
+
+  function openSearch(tab) {
+    if (!SEARCH_POPOVER) return;
+    tab = tab || 'find';
+    SEARCH_POPOVER.hidden = false;
+    SEARCH_POPOVER.querySelectorAll('.t-search-tab').forEach(function (t) {
+      t.classList.toggle('is-active', t.dataset.tab === tab);
+    });
+    SEARCH_POPOVER.querySelectorAll('.t-search-pane').forEach(function (p) {
+      p.hidden = p.dataset.pane !== tab;
+    });
+    var focusInput = SEARCH_POPOVER.querySelector(
+      tab === 'replace' ? '#t-fr-find' : '#t-search');
+    if (focusInput) focusInput.focus();
+  }
+  function closeSearch() {
+    if (SEARCH_POPOVER) SEARCH_POPOVER.hidden = true;
+    clearMatches();
+  }
+
+  if (SEARCH_TOGGLE) SEARCH_TOGGLE.addEventListener('click', function () {
+    if (!SEARCH_POPOVER) return;
+    if (SEARCH_POPOVER.hidden) { openSearch('find'); } else { closeSearch(); }
+  });
+
+  if (SEARCH_POPOVER) SEARCH_POPOVER.querySelectorAll('.t-search-tab').forEach(function (tab) {
+    tab.addEventListener('click', function () { openSearch(tab.dataset.tab); });
+  });
+
+  // Click outside closes the popover
+  document.addEventListener('click', function (e) {
+    if (!SEARCH_POPOVER || SEARCH_POPOVER.hidden) return;
+    if (e.target.closest('#t-search-popover')) return;
+    if (e.target.closest('#t-tb-search-toggle')) return;
+    closeSearch();
+  });
+
   // ===== KEYBOARD =========================================================
   const helpModal = document.getElementById('t-help-modal');
   const helpBtn = document.getElementById('t-help-btn');
@@ -1210,15 +1271,14 @@
     const inText = isTypingTarget(document.activeElement);
     const k = e.key.toLowerCase();
     if ((e.metaKey || e.ctrlKey) && k === 'f' && !e.shiftKey) {
-      e.preventDefault(); openSearch();
-    } else if ((e.metaKey || e.ctrlKey) && k === 'f' && e.shiftKey) {
-      e.preventDefault(); openFR();
+      e.preventDefault(); openSearch('find');
+    } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'F' || e.key === 'f')) {
+      e.preventDefault(); openSearch('replace');
     } else if ((e.metaKey || e.ctrlKey) && k === 'b') {
       e.preventDefault(); doBookmark(player.currentTime, '');
     } else if (e.key === 'Escape') {
-      if (helpModal && !helpModal.hidden) closeHelp();
-      else if (frBar && !frBar.hidden) closeFR();
-      else if (searchBar && !searchBar.hidden) closeSearch();
+      if (helpModal && !helpModal.hidden) { closeHelp(); e.preventDefault(); }
+      else if (SEARCH_POPOVER && !SEARCH_POPOVER.hidden) { closeSearch(); e.preventDefault(); }
       else if (ctxMenu && !ctxMenu.hidden) ctxMenu.hidden = true;
       else if (selToolbar && !selToolbar.hidden) selToolbar.hidden = true;
     } else if (e.key === '?' && !inText) {
