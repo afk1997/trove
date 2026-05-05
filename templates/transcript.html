@@ -132,28 +132,34 @@
           {% endif %}
         </ul>
       </details>
-      {%- set _bookmarks = (data.bookmarks or []) | sort(attribute='time') -%}
       <details class="t-sidebar-panel t-sidebar-panel--bookmarks" open>
         <summary>
           <span class="t-sidebar-panel-h">Bookmarks</span>
-          <span class="t-sidebar-panel-count">{{ _bookmarks | length }}</span>
+          <span class="t-sidebar-panel-count">{{ (data.bookmarks or []) | length }}</span>
         </summary>
         <ul class="t-sidebar-panel-body" data-role="bookmarks-list">
-          {% for bm in _bookmarks %}
-            <li class="t-sidebar-bookmark-row" data-bookmark-id="{{ bm.id }}" data-time="{{ bm.time }}">
+          {% for bm in (data.bookmarks or []) | sort(attribute='time') %}
+            <li class="t-sidebar-bookmark-row" data-bm-id="{{ bm.id }}">
               <button type="button" class="t-sidebar-bookmark-time"
-                      data-action="seek-bookmark" data-time="{{ bm.time }}">
-                {%- set _bm_m = (bm.time | int) // 60 -%}
-                {%- set _bm_s = (bm.time | int) % 60 -%}
-                {{ '%d:%02d' | format(_bm_m, _bm_s) -}}
+                      data-action="seek" data-time="{{ bm.time }}"
+                      title="seek to {{ '%d:%02d' | format(bm.time | int // 60, bm.time | int % 60) }}">
+                {{ '%d:%02d' | format(bm.time | int // 60, bm.time | int % 60) }}
               </button>
-              <span class="t-sidebar-bookmark-note">{{ bm.note or '' }}</span>
+              <span class="t-sidebar-bookmark-note"
+                    contenteditable="plaintext-only" spellcheck="false"
+                    data-action="edit-bookmark" data-bm-id="{{ bm.id }}">{{ bm.note }}</span>
+              <button type="button" class="t-sidebar-bookmark-delete"
+                      data-action="delete-bookmark" data-bm-id="{{ bm.id }}"
+                      aria-label="delete bookmark">×</button>
             </li>
           {% endfor %}
-          {% if not _bookmarks %}
+          {% if not data.bookmarks %}
             <li class="t-sidebar-empty">No bookmarks yet.</li>
           {% endif %}
         </ul>
+        <button type="button" class="t-sidebar-bookmark-add"
+                data-action="add-bookmark"
+                title="bookmark current playback time">+ add bookmark</button>
       </details>
     </aside>
   </div>
@@ -639,11 +645,56 @@
   });
 
   // ===== SIDEBAR BOOKMARK SEEK ============================================
+  // data-action="seek" on .t-sidebar-bookmark-time — pause after seek (no auto-play)
   document.addEventListener('click', function (e) {
-    const btn = e.target.closest('.t-sidebar-bookmark-time[data-action="seek-bookmark"]');
+    const btn = e.target.closest('.t-sidebar-bookmark-time[data-action="seek"]');
     if (!btn) return;
-    const time = parseFloat(btn.dataset.time);
-    if (!isNaN(time)) { player.currentTime = time; player.play().catch(function () {}); }
+    const t = parseFloat(btn.dataset.time || '0');
+    const playerEl = document.getElementById('t-player');
+    if (playerEl) { playerEl.currentTime = t; playerEl.pause(); }
+  });
+
+  // ===== SIDEBAR BOOKMARK ADD =============================================
+  // Captures current playback time, posts a new bookmark, then reloads
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('[data-action="add-bookmark"]');
+    if (!btn) return;
+    const playerEl = document.getElementById('t-player');
+    const t = playerEl ? playerEl.currentTime : 0;
+    fetchTracked('/api/transcribe/' + TID + '/bookmark', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ time: String(t), note: '' }).toString(),
+    }).then(function (r) { if (r && r.ok) location.reload(); });
+  });
+
+  // ===== SIDEBAR BOOKMARK INLINE-NOTE EDIT (PATCH on blur) ================
+  document.addEventListener('blur', function (e) {
+    const note = e.target.closest('.t-sidebar-bookmark-note[data-action="edit-bookmark"]');
+    if (!note) return;
+    const bmId = note.dataset.bmId;
+    const text = (note.textContent || '').trim();
+    fetchTracked('/api/transcribe/' + TID + '/bookmark/' + bmId, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ note: text }).toString(),
+    });
+  }, true);  // capture phase — blur doesn't bubble
+
+  // ===== SIDEBAR BOOKMARK DELETE ==========================================
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('[data-action="delete-bookmark"]');
+    if (!btn) return;
+    const bmId = btn.dataset.bmId;
+    fetchTracked('/api/transcribe/' + TID + '/bookmark/' + bmId, {
+      method: 'DELETE',
+      headers: {},
+    }).then(function (r) {
+      if (r && r.ok) {
+        const row = btn.closest('.t-sidebar-bookmark-row');
+        if (row) row.remove();
+      }
+    });
   });
 
   // ===== TIMESTAMP CLICK -> SEEK ==========================================
