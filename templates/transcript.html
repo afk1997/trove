@@ -45,10 +45,6 @@
       <label class="t-tb-toggle" id="t-tb-follow-wrap"><input type="checkbox" id="t-tb-follow" checked>follow</label>
     </div>
     <div class="t-tb-group t-tb-right">
-      {% if not is_audio %}
-        <button type="button" class="t-tb-btn t-video-show-btn" id="t-video-show-btn"
-                title="show video" hidden>▸ show video</button>
-      {% endif %}
       <details class="t-tb-export">
         <summary class="t-tb-btn">⬇ export ▾</summary>
         <div class="t-tb-export-menu">
@@ -94,9 +90,6 @@
       <button type="button" class="t-pb-speed-btn" data-rate="1.5">1.5×</button>
       <button type="button" class="t-pb-speed-btn" data-rate="2">2×</button>
     </div>
-    {% if is_audio %}
-      <audio id="t-player" preload="metadata" src="{{ media_url }}"></audio>
-    {% endif %}
   </div>
 
   {# === ZONE D: 2-column grid (doc body + sidebar) === #}
@@ -105,29 +98,18 @@
       {% for seg in data.segments %}{% set seg_idx = loop.index0 %}{% include "partials/transcript_segment.html" %}{% endfor %}
     </section>
     <aside class="t-sidebar" id="t-sidebar" aria-label="video and reference panels">
-      {# t-sidebar-video, t-sidebar-player, t-sidebar-panel--speakers,
-         t-sidebar-panel--bookmarks land here in subsequent tasks. The
-         old .t-video-rail and .t-player-bar still render above; this
-         empty shell is enough to satisfy the grid + sidebar layout
-         tests. #}
+      {% if not is_audio %}
+        <div class="t-sidebar-video">
+          <video id="t-player" controls preload="metadata"
+                 src="{{ media_url }}" playsinline></video>
+        </div>
+      {% else %}
+        <div class="t-sidebar-video t-sidebar-video--audio">
+          <audio id="t-player" preload="metadata" src="{{ media_url }}"></audio>
+        </div>
+      {% endif %}
     </aside>
   </div>
-
-  {# Legacy .t-video-rail kept temporarily — removed in Task 3. #}
-  {% if not is_audio %}
-    <aside id="t-video-rail" class="t-video-rail" data-state="floating"
-           aria-label="video player">
-      <div class="t-video-rail-grab" aria-hidden="true" title="drag">⠿</div>
-      <video id="t-player" controls preload="metadata"
-             src="{{ media_url }}" playsinline></video>
-      <div class="t-video-rail-actions">
-        <button type="button" class="t-video-rail-expand"
-                aria-label="expand video to side rail" title="expand">⛶</button>
-        <button type="button" class="t-video-rail-close"
-                aria-label="hide video" title="hide">✕</button>
-      </div>
-    </aside>
-  {% endif %}
 
   <button type="button" class="t-jump-current" id="t-jump-current" hidden>↓ jump to current</button>
 
@@ -634,105 +616,6 @@
     e.preventDefault();
     seekToWord(w);
   });
-
-  // ===== VIDEO RAIL (floating / hidden / expanded) ========================
-  // Only present for video transcripts. Audio transcripts skip this entirely
-  // (no rail element rendered → all selectors below no-op).
-  (function initVideoRail() {
-    const rail = document.getElementById('t-video-rail');
-    const docPage = document.getElementById('t-doc-page');
-    const showBtn = document.getElementById('t-video-show-btn');
-    if (!rail || !docPage) return;
-
-    const KEY = 'trove.video.' + TID;
-    let state;
-    try {
-      state = JSON.parse(localStorage.getItem(KEY) || 'null');
-    } catch (_) { state = null; }
-    if (!state || typeof state !== 'object') {
-      state = { state: 'floating', pos: { x: 24, y: 24 } };
-    }
-
-    function clampPos(pos) {
-      const w = rail.offsetWidth || 280, h = rail.offsetHeight || 160;
-      const maxX = Math.max(8, window.innerWidth - w - 8);
-      const maxY = Math.max(8, window.innerHeight - h - 8);
-      return {
-        x: Math.min(Math.max(8, pos.x | 0), maxX),
-        y: Math.min(Math.max(8, pos.y | 0), maxY),
-      };
-    }
-    function persist() {
-      try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (_) {}
-    }
-    function apply() {
-      rail.dataset.state = state.state;
-      if (state.state === 'floating') {
-        const p = clampPos(state.pos || { x: 24, y: 24 });
-        rail.style.left = p.x + 'px';
-        rail.style.bottom = p.y + 'px';
-        rail.style.right = '';
-        rail.style.top = '';
-      } else {
-        rail.style.left = rail.style.bottom = rail.style.right = rail.style.top = '';
-      }
-      docPage.classList.toggle('has-expanded-video', state.state === 'expanded');
-      if (showBtn) showBtn.hidden = state.state !== 'hidden';
-      persist();
-    }
-
-    const closeBtn = rail.querySelector('.t-video-rail-close');
-    const expandBtn = rail.querySelector('.t-video-rail-expand');
-    if (closeBtn) closeBtn.addEventListener('click', function () {
-      state.state = 'hidden'; apply();
-    });
-    if (expandBtn) expandBtn.addEventListener('click', function () {
-      state.state = state.state === 'expanded' ? 'floating' : 'expanded';
-      apply();
-    });
-    if (showBtn) showBtn.addEventListener('click', function () {
-      state.state = 'floating'; apply();
-    });
-
-    // Drag (floating only). Uses pointer events so it works with mouse + touch.
-    const grab = rail.querySelector('.t-video-rail-grab');
-    if (grab) {
-      let dragging = false;
-      let originX = 0, originY = 0;     // pointer position at drag start
-      let startLeft = 0, startBottom = 0;
-      grab.addEventListener('pointerdown', function (e) {
-        if (state.state !== 'floating') return;
-        dragging = true;
-        originX = e.clientX; originY = e.clientY;
-        startLeft = parseInt(rail.style.left || (state.pos && state.pos.x) || 24, 10);
-        startBottom = parseInt(rail.style.bottom || (state.pos && state.pos.y) || 24, 10);
-        rail.classList.add('is-dragging');
-        try { grab.setPointerCapture(e.pointerId); } catch (_) {}
-        e.preventDefault();
-      });
-      grab.addEventListener('pointermove', function (e) {
-        if (!dragging) return;
-        const dx = e.clientX - originX;
-        const dy = e.clientY - originY;
-        // bottom is anchored to viewport bottom, so dragging DOWN means SUBTRACT
-        const next = clampPos({ x: startLeft + dx, y: startBottom - dy });
-        rail.style.left = next.x + 'px';
-        rail.style.bottom = next.y + 'px';
-        state.pos = next;
-      });
-      function endDrag(e) {
-        if (!dragging) return;
-        dragging = false;
-        rail.classList.remove('is-dragging');
-        try { grab.releasePointerCapture(e.pointerId); } catch (_) {}
-        persist();
-      }
-      grab.addEventListener('pointerup', endDrag);
-      grab.addEventListener('pointercancel', endDrag);
-    }
-
-    apply();
-  })();
 
   // ===== FIRST-VISIT HELP TOAST ===========================================
   try {

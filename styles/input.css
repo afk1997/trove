@@ -63,8 +63,8 @@
     mix-blend-mode: multiply;
     /* Sits above the cream page background but BELOW all sticky chrome
        (.t-doc-header z:30, .t-doc-toolbar z:28, .t-player-bar z:27),
-       floating UI (.t-video-rail z:40, .t-jump-current z:45,
-       .t-context-menu z:60, .t-toast-stack z:80), and modals (z:1000).
+       floating UI (.t-jump-current z:45, .t-context-menu z:60,
+       .t-toast-stack z:80), and modals (z:1000).
        Previously z:100 which visually multiplied the dot texture onto
        every sticky bar as the user scrolled. */
     z-index: 1;
@@ -918,6 +918,28 @@
       gap: 16px;
       width: 320px;
     }
+    .t-sidebar-video {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      border: 1.5px solid var(--teal);
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 6px 24px color-mix(in srgb, black 18%, transparent);
+    }
+    .t-sidebar-video video,
+    .t-sidebar-video audio {
+      width: 100%; height: 100%;
+      object-fit: contain;
+      background: #000;
+      display: block;
+    }
+    .t-sidebar-video--audio {
+      aspect-ratio: auto;
+      height: 88px;
+      display: flex; align-items: center; padding: 0 16px;
+    }
+    .t-sidebar-video--audio audio { width: 100%; height: 32px; }
 
     /* --- Zone A: header (sticky top) --- */
     .t-doc-header {
@@ -1155,94 +1177,6 @@
       background: color-mix(in srgb, var(--orange) 10%, transparent);
       color: var(--orange);
     }
-    /* === Floating video rail (PiP / expanded / hidden states) === */
-    .t-doc-page {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 0;
-      transition: grid-template-columns 200ms ease-out, gap 200ms ease-out;
-    }
-    .t-doc-page.has-expanded-video {
-      grid-template-columns: 440px 1fr;
-      gap: 32px;
-    }
-    .t-doc-page.has-expanded-video .transcript-body { max-width: 620px; }
-
-    .t-video-rail {
-      background: #000;
-      border: 1.5px solid var(--teal);
-      box-shadow: 0 6px 24px color-mix(in srgb, black 22%, transparent);
-      border-radius: 8px;
-      overflow: hidden;
-      z-index: 40;
-    }
-    .t-video-rail[data-state="floating"] {
-      position: fixed;
-      width: 280px; height: 160px;
-      cursor: default;
-    }
-    .t-video-rail[data-state="hidden"] { display: none; }
-    .t-video-rail[data-state="expanded"] {
-      position: sticky; top: 120px;
-      align-self: start;
-      grid-column: 1;
-      width: 100%; height: auto; max-height: 70vh;
-    }
-    .t-video-rail.is-dragging { opacity: 0.85; }
-    .t-video-rail video {
-      width: 100%; height: 100%;
-      object-fit: contain;
-      background: #000;
-      display: block;
-    }
-    .t-video-rail-grab {
-      position: absolute; top: 0; left: 0;
-      width: 28px; height: 28px;
-      display: flex; align-items: center; justify-content: center;
-      color: rgba(255,255,255,0.6);
-      font-size: 14px;
-      cursor: grab;
-      user-select: none;
-      z-index: 2;
-    }
-    .t-video-rail.is-dragging .t-video-rail-grab { cursor: grabbing; }
-    .t-video-rail[data-state="expanded"] .t-video-rail-grab { display: none; }
-    .t-video-rail-actions {
-      position: absolute; top: 6px; right: 6px;
-      display: flex; gap: 4px;
-      z-index: 2;
-    }
-    .t-video-rail-expand,
-    .t-video-rail-close {
-      appearance: none;
-      background: rgba(0,0,0,0.55); color: var(--cream);
-      border: 1px solid rgba(255,255,255,0.25);
-      width: 28px; height: 28px;
-      font-size: 13px; line-height: 1;
-      cursor: pointer;
-      border-radius: 4px;
-    }
-    .t-video-rail-expand:hover,
-    .t-video-rail-close:hover { background: var(--orange); border-color: var(--orange); }
-
-    /* Toolbar "▸ show video" button (only visible when rail is hidden) */
-    .t-video-show-btn {
-      color: var(--orange);
-      font-weight: 600;
-    }
-
-    /* Mobile: collapse to floating-only at the bottom */
-    @media (max-width: 768px) {
-      .t-doc-page.has-expanded-video {
-        grid-template-columns: 1fr;
-        gap: 0;
-      }
-      .t-doc-page.has-expanded-video .transcript-body { max-width: none; }
-      .t-video-rail[data-state="floating"] {
-        width: 220px; height: 124px;
-      }
-    }
-
     /* --- Zone D: document body --- */
     .transcript-body {
       max-width: 720px;
