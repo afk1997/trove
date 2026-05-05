@@ -320,7 +320,13 @@ def create_app() -> Flask:
         job = job_manager.get(job_id)
         if job is None or job.status != JobStatus.DONE or not job.file_path:
             return jsonify({"error": "not_ready"}), 404
-        return send_file(job.file_path, as_attachment=True, download_name=job.filename or "download")
+        # Serve inline so <video src="..."> in the transcript page can
+        # play. The card's "↓ download again" anchor uses the HTML5
+        # `download` attribute, which still saves on click regardless of
+        # Content-Disposition. Using as_attachment=True here would have
+        # broken inline media playback (Content-Disposition: attachment
+        # makes the browser refuse to embed the resource in a <video> tag).
+        return send_file(job.file_path, as_attachment=False, download_name=job.filename or "download")
 
     # --- HTML fragment endpoints (htmx) ------------------------------------
 
