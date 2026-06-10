@@ -1,11 +1,23 @@
 from __future__ import annotations
 import os
+import sys
 import json
 import subprocess
 import glob
 import threading
 import time
+from pathlib import Path
 from dataclasses import dataclass, field
+
+
+def _ytdlp_bin() -> str:
+    """Prefer the yt-dlp binary co-located with the running Python interpreter
+    (i.e. inside the active venv) over whatever 'yt-dlp' resolves to on PATH."""
+    candidate = Path(sys.executable).parent / "yt-dlp"
+    return str(candidate) if candidate.exists() else "yt-dlp"
+
+
+_YTDLP = _ytdlp_bin()
 
 
 def _cookie_args() -> list[str]:
@@ -24,7 +36,7 @@ def build_info_argv(url: str) -> list[str]:
     """Build argv for `yt-dlp -j` (info dump). Always uses `--` separator."""
     _check_url_shape(url)
     return [
-        "yt-dlp",
+        _YTDLP,
         "--no-playlist",
         "-j",
         *_cookie_args(),
@@ -48,7 +60,7 @@ def build_download_argv(
         _cf = 4
     concurrent_fragments = max(1, min(32, _cf))
     argv: list[str] = [
-        "yt-dlp",
+        _YTDLP,
         "--no-playlist",
         "--concurrent-fragments", str(concurrent_fragments),
         "--retries", "5",
