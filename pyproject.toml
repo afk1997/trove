@@ -11,7 +11,10 @@ requires-python = ">=3.11"
 # is one-shot per environment.
 dependencies = [
     "flask>=3.0",
-    "yt-dlp",
+    # Extras matter here: [default] carries yt-dlp-ejs (YouTube JS challenge
+    # solving), [curl-cffi] enables --impersonate, [deno] ships the JS runtime
+    # as a wheel. See requirements.txt for the full rationale.
+    "yt-dlp[default,curl-cffi,deno]>=2026.7.4",
     "pywhispercpp>=1.2.0",
     "psutil>=5.9",
     "resemblyzer>=0.1.4",

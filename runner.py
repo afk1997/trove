@@ -20,11 +20,30 @@ def _ytdlp_bin() -> str:
 _YTDLP = _ytdlp_bin()
 
 
+# NOTE on the JavaScript runtime: yt-dlp needs one (Deno) to solve YouTube's JS
+# challenges, and we install it via the `deno` wheel in requirements.txt. No
+# PATH plumbing is needed to make it discoverable — the wheel exposes
+# find_deno_bin() and yt-dlp imports it, so the runtime resolves even with an
+# empty environment. Verified with `env -i venv/bin/yt-dlp --verbose`, which
+# still reports "JS runtimes: deno-2.9.4".
+
+
 def _cookie_args() -> list[str]:
     browser = os.environ.get("TROVE_COOKIES_FROM_BROWSER", "").strip()
     if not browser:
         return []
     return ["--cookies-from-browser", browser]
+
+
+def _impersonate_args() -> list[str]:
+    """Opt-in browser impersonation for sites that gate on TLS fingerprint.
+
+    Off unless TROVE_IMPERSONATE is set (e.g. "chrome"). Impersonating on every
+    request is a regression risk on the sites that do not need it, so this stays
+    something the user turns on deliberately. Requires the curl-cffi extra.
+    """
+    target = os.environ.get("TROVE_IMPERSONATE", "").strip()
+    return ["--impersonate", target] if target else []
 
 
 def _check_url_shape(url: str) -> None:
@@ -40,6 +59,7 @@ def build_info_argv(url: str) -> list[str]:
         "--no-playlist",
         "-j",
         *_cookie_args(),
+        *_impersonate_args(),
         "--",
         url,
     ]
@@ -67,6 +87,7 @@ def build_download_argv(
         "--fragment-retries", "10",
         "-o", out_template,
         *_cookie_args(),
+        *_impersonate_args(),
     ]
     if format_choice == "audio":
         argv += ["-x", "--audio-format", "mp3"]

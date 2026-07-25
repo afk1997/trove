@@ -28,14 +28,48 @@ paste a link, get the file. transcribe it. edit the transcript like a doc. all l
 
 ## quick start
 
+**macOS — no terminal required.**
+
 ```bash
-brew install yt-dlp ffmpeg     # macOS — or apt install ffmpeg && pip install yt-dlp
+brew install python@3.14 ffmpeg      # the only two prerequisites
 git clone https://github.com/afk1997/trove.git
-cd trove
-./trove.sh
 ```
 
-open **http://localhost:8899** and paste something.
+then open the `trove` folder in Finder and **double-click `start-trove.command`**.
+
+that's it. the first launch builds a virtualenv, installs everything, and opens
+your browser at **http://localhost:8899** once the server is actually listening.
+it takes a couple of minutes. every launch after that is near-instant, because
+the dependency set is fingerprinted and skipped when nothing changed.
+
+prefer a terminal, or on Linux? the wrapper just calls `./trove.sh`, so use that
+directly:
+
+```bash
+cd trove
+./trove.sh              # core: downloader + transcription
+./trove.sh --full       # also install speaker diarization (pulls torch, ~1.3GB)
+./trove.sh --no-open    # don't open a browser
+./trove.sh --help
+```
+
+it checks your machine before doing anything and tells you exactly what to fix
+if something is missing — Python ≥3.11, ffmpeg, and a virtualenv that still
+points at an interpreter that exists. a venv orphaned by a Homebrew Python
+upgrade is detected and rebuilt automatically rather than failing with a
+`bad interpreter` error.
+
+> **YouTube needs a JavaScript runtime.** yt-dlp now requires an external JS
+> runtime to solve YouTube's challenges; without one, extraction is deprecated
+> and formats go missing. trove installs [Deno](https://deno.com/) into its own
+> virtualenv as a wheel, so there is nothing for you to install system-wide and
+> nothing on your `PATH` to conflict with. you will also want
+> `TROVE_COOKIES_FROM_BROWSER=safari` (or `chrome`, `firefox`, …) — Google
+> blocks cookieless yt-dlp. see the env var table below.
+
+*if macOS refuses to open `start-trove.command` because it "cannot be verified",
+you downloaded the repo as a zip rather than cloning it. either `git clone`
+instead, or run `xattr -d com.apple.quarantine start-trove.command` once.*
 
 or with Docker:
 
@@ -59,6 +93,7 @@ docker run -p 8899:8899 -e HOST=0.0.0.0 -e TROVE_ALLOW_UNAUTH_PUBLIC=1 trove
 | `TROVE_TOKEN` | *(unset)* | when set, every `/api/*` request must send `Authorization: Bearer <token>`. |
 | `TROVE_ALLOW_UNAUTH_PUBLIC` | *(unset)* | set to `1` to allow `HOST=0.0.0.0` with no token (Docker port-forward, trusted LAN). without this opt-in, trove refuses to start on a non-loopback bind unless `TROVE_TOKEN` is set. |
 | `TROVE_COOKIES_FROM_BROWSER` | *(unset)* | one of `safari\|chrome\|firefox\|brave\|edge`. required for YouTube right now (Google blocks cookieless yt-dlp). |
+| `TROVE_IMPERSONATE` | *(unset)* | a yt-dlp impersonate target such as `chrome` or `safari`. makes yt-dlp mimic a real browser's TLS fingerprint for sites that block on it. off by default — impersonating everywhere is a regression risk on sites that don't need it. run `venv/bin/yt-dlp --list-impersonate-targets` to see what's available. |
 | `TROVE_CONCURRENT_FRAGMENTS` | `4` | parallel fragment downloads for HLS streams (YouTube etc.). clamped 1–32. |
 | `TROVE_JOB_TTL_SECONDS` | `3600` | how long completed jobs (and their files) linger before being swept. |
 | `TROVE_MAX_WORKERS` | `4` | concurrent downloads. excess returns HTTP 503. |
