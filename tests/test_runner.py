@@ -1,15 +1,58 @@
 import os
 import subprocess
+import sys
+from pathlib import Path
+
 import pytest
+import runner
 from runner import build_info_argv, build_download_argv
 
 
 def test_info_argv_dash_dash_separator():
     argv = build_info_argv("https://example.com/video")
     assert argv[-2:] == ["--", "https://example.com/video"]
-    assert argv[0] == "yt-dlp"
+    # _ytdlp_bin() resolves to an absolute path when a venv-local yt-dlp
+    # exists, so assert on the program name rather than the whole string.
+    assert os.path.basename(argv[0]) == "yt-dlp"
     assert "--no-playlist" in argv
     assert "-j" in argv
+
+
+def test_ytdlp_bin_prefers_venv_local_binary(tmp_path, monkeypatch):
+    """A yt-dlp sitting next to the interpreter wins over PATH."""
+    fake_bin = tmp_path / "yt-dlp"
+    fake_bin.write_text("#!/bin/sh\n")
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "python"))
+    assert runner._ytdlp_bin() == str(fake_bin)
+
+
+def test_ytdlp_bin_falls_back_to_path(tmp_path, monkeypatch):
+    """With no venv-local copy, fall back to whatever PATH resolves."""
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "python"))
+    assert runner._ytdlp_bin() == "yt-dlp"
+
+
+def test_impersonate_absent_by_default(monkeypatch):
+    monkeypatch.delenv("TROVE_IMPERSONATE", raising=False)
+    assert "--impersonate" not in build_info_argv("https://example.com/v")
+
+
+def test_impersonate_injected_when_env_set(monkeypatch):
+    monkeypatch.setenv("TROVE_IMPERSONATE", "chrome")
+    argv = build_info_argv("https://example.com/v")
+    assert argv[argv.index("--impersonate") + 1] == "chrome"
+    # Must stay in front of the `--` separator, or yt-dlp reads it as a URL.
+    assert argv.index("--impersonate") < argv.index("--")
+
+
+def test_impersonate_ignores_blank_env(monkeypatch):
+    monkeypatch.setenv("TROVE_IMPERSONATE", "   ")
+    assert "--impersonate" not in build_download_argv(
+        url="https://example.com/v",
+        out_template="/tmp/out.%(ext)s",
+        format_choice="video",
+        format_id=None,
+    )
 
 
 def test_info_argv_injects_cookies_when_env_set(monkeypatch):
