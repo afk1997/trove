@@ -1,7 +1,29 @@
 flask>=3.0
-# yt-dlp from master — YouTube extraction breaks frequently on stable releases.
-# trove.sh / Dockerfile install this from the GitHub master tarball directly.
-yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz
+
+# --- yt-dlp -------------------------------------------------------------
+# The extras are the important part, not the version:
+#   [default]   pulls yt-dlp-ejs. yt-dlp needs an external JavaScript runtime
+#               to solve YouTube's JS challenges; without it YouTube
+#               extraction is deprecated and formats go missing.
+#   [curl-cffi] enables --impersonate for sites that gate on TLS fingerprint.
+#               Off unless TROVE_IMPERSONATE is set.
+#   [deno]      ships the Deno runtime as a wheel, so nothing has to be
+#               installed system-wide. runner.py puts venv/bin on PATH for the
+#               yt-dlp subprocess so it can actually be found.
+#
+# This line alone resolves to the latest stable, which works fine. To track
+# yt-dlp's nightly channel instead — upstream's recommendation for regular
+# users, since extractors break weekly and the stable cut lags — re-resolve
+# yt-dlp on its own afterwards:
+#
+#   pip install -U --pre "yt-dlp[default,curl-cffi,deno]"
+#
+# Keep that a separate command. --pre applies to every requirement in the
+# invocation, so passing it alongside this file would also allow pre-release
+# Flask, scikit-learn and the rest. trove.sh and the Dockerfile both do it
+# this way.
+yt-dlp[default,curl-cffi,deno]>=2026.7.4
+
 pytest>=8.0
 pywhispercpp>=1.2.0
 psutil>=5.9
@@ -10,6 +32,7 @@ psutil>=5.9
 # Now installed by default. Set TROVE_DIARIZATION=on at runtime to
 # enable speaker detection on transcribe. PyTorch is pulled in
 # transitively by resemblyzer (~1.3GB on Linux due to NVIDIA wheels).
+# trove.sh keeps these behind --full so a first run stays fast.
 resemblyzer>=0.1.4
 silero-vad>=5.1
 scikit-learn>=1.3

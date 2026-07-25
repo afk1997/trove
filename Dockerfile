@@ -26,8 +26,13 @@ RUN apt-get update && \
 RUN useradd -m -u 1000 trove
 WORKDIR /app
 COPY requirements.txt .
-# requirements.txt installs yt-dlp from its master branch (current YouTube extractors).
 RUN pip install --no-cache-dir -r requirements.txt
+# Then re-resolve yt-dlp alone against the nightly channel — upstream's own
+# recommendation for regular users, since extractors break faster than the
+# stable cadence. This is a separate step on purpose: --pre applies to every
+# requirement in the command, so folding it into the line above would also
+# green-light pre-release Flask, scikit-learn and friends.
+RUN pip install --no-cache-dir -U --pre "yt-dlp[default,curl-cffi,deno]"
 
 # Persist the whisper model cache across container restarts.
 # Users wanting explicit control can bind-mount: -v ./models:/app/models
