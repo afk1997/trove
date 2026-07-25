@@ -26,7 +26,7 @@ Two related problems, one branch:
 | B2 | `trove.sh` installs only `flask pytest` + yt-dlp. `psutil`, `pywhispercpp`, `resemblyzer`, `silero-vad`, `scikit-learn`, `mcp` are never installed, so transcription and diarization silently do not work. | `trove.sh:45` vs `requirements.txt` |
 | B3 | The failure in B2 is invisible: `machine.py` wraps `import psutil` in `try/except` and sets `psutil = None`. No error is ever surfaced. | `machine.py:13-15` |
 | B4 | No `yt-dlp` extras anywhere ⇒ no `yt-dlp-ejs` ⇒ degraded YouTube. | `requirements.txt:4`, `pyproject.toml:14` |
-| B5 | Even once Deno is installed into the venv, yt-dlp cannot find it. yt-dlp discovers JS runtimes via `PATH`, and trove's subprocess does not have `venv/bin` on `PATH`. `runner.py` special-cases this for the `yt-dlp` binary but nothing does it for Deno. | `runner.py:13-20` |
+| ~~B5~~ | ~~Even once Deno is installed into the venv, yt-dlp cannot find it via `PATH`.~~ **Withdrawn — this was a wrong hypothesis, disproven during verification.** The `deno` wheel exposes `find_deno_bin()` and yt-dlp imports it, so the runtime resolves with no `PATH` involvement at all: `env -i venv/bin/yt-dlp --verbose` still reports `JS runtimes: deno-2.9.4`. The PATH-injection code written against this premise was removed rather than kept with a false rationale. | — |
 | B6 | The master tarball is unversioned, so pip cannot tell builds apart. This forced a `--force-reinstall` on *every single launch* — slow, and a hard network dependency just to start the app. | `trove.sh:44` |
 | B7 | `trove.sh` accepts Python 3.10, but `pyproject.toml` requires `>=3.11` and yt-dlp raised its minimum recommended to 3.11 (3.10 is EOL October 2026). | `trove.sh:11` vs `pyproject.toml:5` |
 
@@ -59,14 +59,16 @@ update step must not block startup — it logs a warning and continues with what
 - `Dockerfile` — `--pre` + extras
 - `trove.sh` — the install step above
 
-### `runner.py` — PATH injection (fixes B5)
+### `runner.py` — no PATH plumbing needed
 
-Add a helper that returns an environment for yt-dlp subprocesses with the venv `bin`
-directory prepended to `PATH`, and pass it to both `subprocess.run` and `subprocess.Popen`.
+The original plan called for prepending the venv `bin` dir to `PATH` for yt-dlp
+subprocesses, on the theory that Deno would otherwise be undiscoverable. **Verification
+disproved it** (see B5 above), so no such code ships. `runner.py` gets a comment recording
+the finding and the command that demonstrates it, so the next person does not re-derive
+the same wrong conclusion.
 
-**Explicitly rejected:** passing `--js-runtimes deno:<path>`. That flag hard-errors on
-older yt-dlp builds, turning a graceful degradation into a crash. `PATH` injection is
-found-or-not, never fatal.
+**Also rejected:** passing `--js-runtimes deno:<path>`. That flag hard-errors on older
+yt-dlp builds, and it is unnecessary given the wheel resolves itself.
 
 ### Impersonation is opt-in
 
