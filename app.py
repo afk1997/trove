@@ -2,6 +2,9 @@
 from __future__ import annotations
 import os
 from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from mp4 import ConversionError, convert_mp4
 from flask import Flask, jsonify, render_template, request, send_file, abort
 
 from safety import (
@@ -19,7 +22,7 @@ from runner import run_info, run_download, classify_error
 from jobs import JobManager, Job, JobStatus
 import models_store
 import machine
-from threading import Thread, Lock
+from threading import BoundedSemaphore, Thread, Lock
 import transcribe_jobs
 import transcriber
 import transcript_io
@@ -265,6 +268,43 @@ def create_app() -> Flask:
                 continue
             initial_cards.append(_card_view(j))
         return render_template("index.html", initial_cards=initial_cards)
+
+    converter_slots = BoundedSemaphore(max(1, MAX_WORKERS))
+
+    @app.get("/convert")
+    def converter():
+        return render_template("convert.html")
+
+    @app.post("/api/convert")
+    @token_required
+    def convert_local_video():
+        if not converter_slots.acquire(blocking=False):
+            return render_template("convert.html", error="All converters are busy. Try again shortly."), 503
+        temp = None
+        try:
+            upload = request.files.get("video")
+            if not upload or not upload.filename:
+                return render_template("convert.html", error="Choose a video file."), 400
+            with TemporaryDirectory(prefix="trove-upload-") as inputs:
+                original = Path(upload.filename)
+                source = Path(inputs) / ("input.mp4" if original.suffix.lower() == ".mp4" else "input")
+                upload.save(source)
+                temp = TemporaryDirectory(prefix="trove-export-")
+                output = convert_mp4(source, Path(temp.name) / "converted.mp4")
+            response = send_file(output, as_attachment=True, mimetype="video/mp4",
+                                 download_name=sanitize_filename(original.stem + " - compatible", ".mp4"))
+            # Close send_file's stream before removing its directory, including
+            # when the client disconnects partway through the download.
+            response.direct_passthrough = False
+            response.call_on_close(temp.cleanup)
+            temp = None
+            return response
+        except ConversionError:
+            return render_template("convert.html", error="Could not convert this file. Choose a readable video with a video track."), 422
+        finally:
+            if temp is not None:
+                temp.cleanup()
+            converter_slots.release()
 
     # --- JSON API (stable, scriptable) -------------------------------------
 
@@ -526,20 +566,17 @@ def create_app() -> Flask:
                 j.fragment_index = frag_idx
                 j.fragment_count = frag_count
 
-            def _register_proc(popen):
-                j.process = popen
-
             result = run_download(
                 url=url,
                 out_template=out_template,
                 format_choice=format_choice,
                 format_id=format_id,
                 progress_cb=_on_progress,
-                register_process=_register_proc,
+                register_process=j.register_process,
                 was_paused_check=lambda: j._was_paused,
             )
             if result.error_category:
-                if not j._was_paused:
+                if not j._was_paused and j.status != JobStatus.CANCELLED:
                     j.status = JobStatus.ERROR
                     j.error_category = result.error_category
                     j.error_message = result.error_raw
@@ -984,20 +1021,17 @@ def create_app() -> Flask:
                 job.fragment_index = frag_idx
                 job.fragment_count = frag_count
 
-            def _register_proc(popen):
-                job.process = popen
-
             result = run_download(
                 url=url,
                 out_template=out_template,
                 format_choice=format_choice,
                 format_id=format_id,
                 progress_cb=_on_progress,
-                register_process=_register_proc,
+                register_process=job.register_process,
                 was_paused_check=lambda: job._was_paused,
             )
             if result.error_category:
-                if not job._was_paused:
+                if not job._was_paused and job.status != JobStatus.CANCELLED:
                     job.status = JobStatus.ERROR
                     job.error_category = result.error_category
                     job.error_message = result.error_raw
@@ -1083,20 +1117,17 @@ def create_app() -> Flask:
                 j.fragment_index = frag_idx
                 j.fragment_count = frag_count
 
-            def _register_proc(popen):
-                j.process = popen
-
             result = run_download(
                 url=url,
                 out_template=out_template,
                 format_choice=format_choice,
                 format_id=format_id,
                 progress_cb=_on_progress,
-                register_process=_register_proc,
+                register_process=j.register_process,
                 was_paused_check=lambda: j._was_paused,
             )
             if result.error_category:
-                if not j._was_paused:
+                if not j._was_paused and j.status != JobStatus.CANCELLED:
                     j.status = JobStatus.ERROR
                     j.error_category = result.error_category
                     j.error_message = result.error_raw

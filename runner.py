@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from dataclasses import dataclass, field
 from tempfile import TemporaryDirectory
+from mp4 import ConversionError, prepare_download
 
 
 def _ytdlp_bin() -> str:
@@ -318,10 +319,18 @@ def run_download(
     )
     try:
         with _session_argv(argv) as command:
-            return _run_download(command, out_template, format_choice, timeout,
-                                 progress_cb, register_process, was_paused_check)
+            result = _run_download(command, out_template, format_choice, timeout,
+                                   progress_cb, register_process, was_paused_check)
     except _SessionFileError as exc:
         return DownloadResult(error_category="instagram_session_unavailable", error_raw=str(exc))
+    if format_choice == "video" and result.file_path and not result.error_category:
+        try:
+            result.file_path = str(prepare_download(Path(result.file_path), register_process))
+        except (ConversionError, OSError) as exc:
+            if not (was_paused_check and was_paused_check()):
+                _cleanup_glob(out_template)
+            return DownloadResult(error_category="conversion_failed", error_raw=str(exc))
+    return result
 
 
 def _run_download(argv, out_template, format_choice, timeout,

@@ -11,6 +11,7 @@ paste a link, get the file. transcribe it. edit the transcript like a doc. all l
 ## what's inside
 
 - **save** — one paste box, MP4/MP3 toggle, quality picker. live progress with %, MB, fragment count, ETA.
+- **compatible MP4** — video downloads use H.264 video and AAC audio for native players. To convert a file you already have, choose **convert a video to MP4** on the home page. Trove keeps the original and downloads a compatible copy.
 - **bulk paste** — drop a wall of URLs, batch them all at once.
 - **pause / resume** — pause a download mid-flight; closing the tab auto-pauses (resumes on next visit).
 - **transcribe** — local whisper.cpp on every saved file. word-level timestamps. exports `.txt` / `.srt` / `.vtt`.

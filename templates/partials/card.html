@@ -1,5 +1,6 @@
 {% set msgs = {
   "unsupported_url": "URL not supported",
+  "conversion_failed": "could not prepare a compatible MP4",
   "private_or_unavailable": "video private or unavailable",
   "geo_restricted": "not available in your region",
   "rate_limited": "rate limited — try again in a minute",
@@ -107,7 +108,9 @@
   <div class="clip-body">
     <p class="clip-title">{{ card.title or "untitled" }}</p>
     <p class="clip-meta">
-      {% if card.total_bytes %}
+      {% if card.kind == "downloading" and card.percent == 100 %}
+        PREPARING FILE
+      {% elif card.total_bytes %}
         {{ "%.1f"|format(card.downloaded_bytes / 1048576) }} MB
         <span class="sep">/</span>{{ "%.1f"|format(card.total_bytes / 1048576) }} MB
         <span class="sep">·</span>{{ card.percent }}%

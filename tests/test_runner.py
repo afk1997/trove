@@ -258,6 +258,11 @@ def test_run_download_success(monkeypatch, tmp_path):
     out_template = str(tmp_path / "abc.%(ext)s")
     target = tmp_path / "abc.mp4"
     target.write_bytes(b"fakempegdata")
+    prepared = []
+    def prepare(path, register_process):
+        prepared.append(path)
+        return path
+    monkeypatch.setattr(runner, "prepare_download", prepare)
 
     class FakeCompleted:
         returncode = 0
@@ -275,6 +280,7 @@ def test_run_download_success(monkeypatch, tmp_path):
     assert isinstance(res, DownloadResult)
     assert res.error_category is None
     assert res.file_path == str(target)
+    assert prepared == [target]
 
 
 def test_run_download_audio_must_be_mp3(monkeypatch, tmp_path):

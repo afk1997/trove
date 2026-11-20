@@ -54,12 +54,19 @@ class Job:
     # "transcribe after download" checkbox is checked. Persisted so the
     # behavior survives a server restart and a paused→resumed download.
     auto_transcribe: bool = False
+
     # Transient hint surfaced on the DONE card when auto-transcribe was
     # requested but couldn't fire (e.g. no active model). Not persisted;
     # the hint disappears after a server restart, which is acceptable —
     # the user can still click `▸ transcribe` manually after installing
     # a model.
     _auto_transcribe_hint: str | None = None
+
+    def register_process(self, proc) -> None:
+        self.process = proc
+        # Pause/cancel can land between the downloader and the encoder.
+        if self.status in (JobStatus.CANCELLED, JobStatus.PAUSED):
+            proc.kill()
 
 
 class JobManager:

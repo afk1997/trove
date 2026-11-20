@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}MP4 converter · Trove{% endblock %}
+{% block content %}
+<div class="hero-stage">
+  <div class="hero-top"><a href="/" class="hero-ticker-link">← Trove</a></div>
+  <h1 class="hero-mark">MP4 converter<span class="period">.</span></h1>
+  <p class="hero-tag">Make a copy for QuickTime and other built-in players.</p>
+  <form class="hero-plate" method="post" action="/api/convert" enctype="multipart/form-data">
+    <div class="hero-plate-header"><label for="video">Video file</label></div>
+    <div class="hero-input-row"><input id="video" name="video" type="file" accept="video/*,.mpeg4,.m4v,.mkv,.webm,.avi" required></div>
+    <div class="hero-controls">
+      <span>H.264 MP4 · original file kept</span>
+      <button type="submit" class="hero-cta">Convert &amp; download ↗</button>
+    </div>
+    {% if error %}<p class="clip-err-msg" role="alert">{{ error }}</p>{% endif %}
+  </form>
+</div>
+{% endblock %}
