@@ -68,6 +68,56 @@ def test_info_argv_ignores_blank_cookie_env(monkeypatch):
     assert "--cookies-from-browser" not in argv
 
 
+@pytest.mark.parametrize("url,is_post", [
+    ("https://www.instagram.com/p/Ab9-x_2/?img_index=1", True),
+    ("https://instagram.com/creator/reel/Ab9-x_2/", True),
+    ("https://www.instagram.com.example.com/p/Ab9-x_2/", False),
+    ("https://instagram.com@other.example/p/Ab9-x_2/", False),
+    ("https://l.instagram.com/?u=other", False),
+    ("https://example.com/instagram.com/p/Ab9-x_2/", False),
+])
+def test_instagram_saved_session_scope(monkeypatch, url, is_post):
+    monkeypatch.setenv("TROVE_INSTAGRAM_COOKIES_FILE", "/local/session")
+    monkeypatch.delenv("TROVE_COOKIES_FROM_BROWSER", raising=False)
+    for argv in (build_info_argv(url), build_download_argv(
+        url=url, out_template="job.%(ext)s", format_choice="video", format_id=None,
+    )):
+        if is_post:
+            assert argv[argv.index("--cookies") + 1] == "/local/session"
+        else:
+            assert "--cookies" not in argv
+        assert "--cookies-from-browser" not in argv
+
+
+def test_instagram_session_overrides_global_only_for_posts(monkeypatch):
+    monkeypatch.setenv("TROVE_INSTAGRAM_COOKIES_FILE", "/local/session")
+    monkeypatch.setenv("TROVE_COOKIES_FROM_BROWSER", "firefox")
+    assert "--cookies-from-browser" not in build_info_argv("https://instagram.com/reel/Abc/")
+    assert "firefox" in build_info_argv("https://example.com/v")
+
+
+def test_saved_session_survives_downloader_writes(monkeypatch, tmp_path):
+    session = tmp_path / "saved"
+    session.write_text("original")
+    monkeypatch.setenv("TROVE_INSTAGRAM_COOKIES_FILE", str(session))
+    argv = build_info_argv("https://instagram.com/p/Abc/")
+    with runner._session_argv(argv) as first, runner._session_argv(argv) as second:
+        a = Path(first[first.index("--cookies") + 1])
+        b = Path(second[second.index("--cookies") + 1])
+        a.write_text("changed by yt-dlp")
+        assert b.read_text() == session.read_text() == "original"
+    assert not a.exists() and not b.exists()
+
+
+def test_missing_instagram_session_is_reported(monkeypatch, tmp_path):
+    monkeypatch.setenv("TROVE_INSTAGRAM_COOKIES_FILE", str(tmp_path / "missing"))
+    url = "https://instagram.com/p/Abc/"
+    assert runner.run_info(url).error_category == "instagram_session_unavailable"
+    result = runner.run_download(url=url, out_template="job.%(ext)s", format_choice="video",
+                                 format_id=None)
+    assert result.error_category == "instagram_session_unavailable"
+
+
 def test_download_argv_audio_mode(tmp_path):
     argv = build_download_argv(
         url="https://example.com/v",
@@ -127,6 +177,8 @@ from runner import classify_error
     ("ERROR: HTTP Error 403: Forbidden", "auth_required"),
     ("ERROR: HTTP Error 429: Too Many Requests", "rate_limited"),
     ("ERROR: HTTP Error 404: Not Found", "private_or_unavailable"),
+    ("ERROR: [Instagram] Abc: This content isn't available to everyone: "
+     "It can't be seen by certain audiences.", "instagram_audience_restricted"),
     ("ERROR: unable to download video data: HTTP Error 403: Forbidden", "auth_required"),
     ("ERROR: [generic] some weird thing", "unknown"),
     ("ERROR: Unable to connect to proxy", "network"),

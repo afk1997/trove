@@ -93,6 +93,7 @@ docker run -p 8899:8899 -e HOST=0.0.0.0 -e TROVE_ALLOW_UNAUTH_PUBLIC=1 trove
 | `TROVE_TOKEN` | *(unset)* | when set, every `/api/*` request must send `Authorization: Bearer <token>`. |
 | `TROVE_ALLOW_UNAUTH_PUBLIC` | *(unset)* | set to `1` to allow `HOST=0.0.0.0` with no token (Docker port-forward, trusted LAN). without this opt-in, trove refuses to start on a non-loopback bind unless `TROVE_TOKEN` is set. |
 | `TROVE_COOKIES_FROM_BROWSER` | *(unset)* | one of `safari\|chrome\|firefox\|brave\|edge`. required for YouTube right now (Google blocks cookieless yt-dlp). |
+| `TROVE_INSTAGRAM_COOKIES_FILE` | *(unset)* | Path to a private Netscape-format cookie file containing only your Instagram session. Set this in the repo's local `.env` to reuse the session after relaunching Trove. Keep the file outside the repo and refresh it when Instagram expires the session. |
 | `TROVE_IMPERSONATE` | *(unset)* | a yt-dlp impersonate target such as `chrome` or `safari`. makes yt-dlp mimic a real browser's TLS fingerprint for sites that block on it. off by default — impersonating everywhere is a regression risk on sites that don't need it. run `venv/bin/yt-dlp --list-impersonate-targets` to see what's available. |
 | `TROVE_CONCURRENT_FRAGMENTS` | `4` | parallel fragment downloads for HLS streams (YouTube etc.). clamped 1–32. |
 | `TROVE_JOB_TTL_SECONDS` | `3600` | how long completed jobs (and their files) linger before being swept. |
