@@ -1,4 +1,4 @@
-flask>=3.0
+flask[dotenv]>=3.0
 
 # --- yt-dlp -------------------------------------------------------------
 # The extras are the important part, not the version:

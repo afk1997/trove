@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 # wheels torch pulls in transitively are heavy (~1.3GB) but the install
 # is one-shot per environment.
 dependencies = [
-    "flask>=3.0",
+    "flask[dotenv]>=3.0",
     # Extras matter here: [default] carries yt-dlp-ejs (YouTube JS challenge
     # solving), [curl-cffi] enables --impersonate, [deno] ships the JS runtime
     # as a wheel. See requirements.txt for the full rationale.

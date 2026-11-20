@@ -134,7 +134,7 @@ fi
 #   [curl-cffi] --impersonate, for sites that gate on TLS fingerprint.
 #   [deno]      the Deno JS runtime, shipped as a wheel, so no Homebrew needed.
 YTDLP_SPEC='yt-dlp[default,curl-cffi,deno]'
-CORE_PKGS='flask>=3.0 psutil>=5.9 pywhispercpp>=1.2.0 mcp>=1.0 pytest>=8.0'
+CORE_PKGS='flask[dotenv]>=3.0 psutil>=5.9 pywhispercpp>=1.2.0 mcp>=1.0 pytest>=8.0'
 FULL_PKGS='resemblyzer>=0.1.4 silero-vad>=5.1 scikit-learn>=1.3'
 
 sha() { if command -v shasum >/dev/null 2>&1; then shasum -a 256; else sha256sum; fi; }

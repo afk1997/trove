@@ -1,13 +1,17 @@
 from __future__ import annotations
 import os
+import re
+import shutil
 import sys
 import json
 import subprocess
 import glob
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from dataclasses import dataclass, field
+from tempfile import TemporaryDirectory
 
 
 def _ytdlp_bin() -> str:
@@ -28,11 +32,40 @@ _YTDLP = _ytdlp_bin()
 # still reports "JS runtimes: deno-2.9.4".
 
 
-def _cookie_args() -> list[str]:
+_INSTAGRAM_POST = re.compile(
+    r"https://(?:www\.)?instagram\.com/(?:[\w.]+/)?(?:p|reels?|tv)/"
+    r"[A-Za-z0-9_-]+/?(?:[?#].*)?", re.ASCII | re.IGNORECASE,
+)
+
+
+def _cookie_args(url: str) -> list[str]:
+    saved_session = os.environ.get("TROVE_INSTAGRAM_COOKIES_FILE", "").strip()
+    if saved_session and _INSTAGRAM_POST.fullmatch(url):
+        return ["--cookies", os.path.expanduser(saved_session)]
     browser = os.environ.get("TROVE_COOKIES_FROM_BROWSER", "").strip()
     if not browser:
         return []
     return ["--cookies-from-browser", browser]
+
+
+class _SessionFileError(OSError):
+    pass
+
+
+@contextmanager
+def _session_argv(argv):
+    """yt-dlp writes its cookie jar on exit. Give each request a private copy."""
+    if "--cookies" not in argv:
+        yield argv
+        return
+    index = argv.index("--cookies") + 1
+    with TemporaryDirectory(prefix="trove-session-") as directory:
+        working_file = Path(directory) / "cookies.txt"
+        try:
+            shutil.copyfile(argv[index], working_file)
+        except OSError as exc:
+            raise _SessionFileError("Cannot read the saved Instagram session.") from exc
+        yield [*argv[:index], str(working_file), *argv[index + 1:]]
 
 
 def _impersonate_args() -> list[str]:
@@ -58,7 +91,7 @@ def build_info_argv(url: str) -> list[str]:
         _YTDLP,
         "--no-playlist",
         "-j",
-        *_cookie_args(),
+        *_cookie_args(url),
         *_impersonate_args(),
         "--",
         url,
@@ -86,7 +119,7 @@ def build_download_argv(
         "--retries", "5",
         "--fragment-retries", "10",
         "-o", out_template,
-        *_cookie_args(),
+        *_cookie_args(url),
         *_impersonate_args(),
     ]
     if format_choice == "audio":
@@ -106,6 +139,12 @@ def classify_error(stderr: str) -> str:
         return "unknown"
     if "unsupported url" in s:
         return "unsupported_url"
+    if "[instagram]" in s and (
+        "can't be seen by certain audiences" in s
+        or "this content isn't available to everyone" in s
+        or "restricted video" in s
+    ):
+        return "instagram_audience_restricted"
     if "video unavailable" in s or "private video" in s or "http error 404" in s:
         return "private_or_unavailable"
     if "sign in" in s or "http error 401" in s or "http error 403" in s:
@@ -153,7 +192,10 @@ def _build_quality_options(raw_formats: list[dict]) -> list[dict]:
 def run_info(url: str, *, timeout: int = 60) -> InfoResult:
     argv = build_info_argv(url)
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        with _session_argv(argv) as command:
+            proc = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    except _SessionFileError as exc:
+        return InfoResult(error_category="instagram_session_unavailable", error_raw=str(exc))
     except subprocess.TimeoutExpired:
         return InfoResult(error_category="timeout", error_raw="info fetch timed out")
     if proc.returncode != 0:
@@ -274,6 +316,16 @@ def run_download(
         format_choice=format_choice,
         format_id=format_id,
     )
+    try:
+        with _session_argv(argv) as command:
+            return _run_download(command, out_template, format_choice, timeout,
+                                 progress_cb, register_process, was_paused_check)
+    except _SessionFileError as exc:
+        return DownloadResult(error_category="instagram_session_unavailable", error_raw=str(exc))
+
+
+def _run_download(argv, out_template, format_choice, timeout,
+                  progress_cb, register_process, was_paused_check):
 
     # Legacy blocking path: tests monkeypatch subprocess.run, so keep it intact
     # when nothing wants progress streaming.
